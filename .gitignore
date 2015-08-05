@@ -11,10 +11,10 @@
 
 **/Makefile
 /autom4te.cache
-/aclocal.m4
+# /aclocal.m4
 /compile
-/depcomp
-/install-sh
+# /depcomp
+# /install-sh
 /missing
 **/stamp-h1
 /config.log
