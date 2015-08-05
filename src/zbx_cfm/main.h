@@ -8,13 +8,20 @@ enum {
    max_objid_strlen = 1024      // Should be enough, huh?
 };
 
+enum class cfm_alert_type : int {
+   ZBX_SENDER = 1,
+   SNMP_TRAP
+};
+
 struct hostdata
 {
    std::string hostname;
    buffer objid;
    uint_t zbx_id;
 
-   hostdata(const char *hostname_) : hostname(hostname_), objid(max_objid_strlen) { }
+   cfm_alert_type alert_type;
+
+   hostdata(const char *hostname_) : hostname(hostname_) { }
 };
 
 

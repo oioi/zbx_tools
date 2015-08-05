@@ -3,7 +3,7 @@ AM_INIT_AUTOMAKE
 
 AM_CONFIG_HEADER(include/config.h)
 
-CXXFLAGS='-Wall -Wextra -pedantic --std=c++11 -O2'
+CXXFLAGS='-Wall -Wextra -pedantic --std=c++11 -g'
 
 AC_PROG_CC
 AC_PROG_CXX
@@ -19,6 +19,7 @@ AC_OUTPUT([
         src/libs/curl_cl/Makefile
         src/libs/frozen/Makefile
         src/libs/logging/Makefile
+        src/libs/mysql/Makefile
         src/zbx_mail/Makefile
 	src/zbx_cfm/Makefile
         ])

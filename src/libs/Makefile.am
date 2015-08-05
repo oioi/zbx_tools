@@ -1,1 +1,1 @@
-SUBDIRS = api buffer curl_cl frozen logging
+SUBDIRS = api buffer curl_cl frozen logging mysql

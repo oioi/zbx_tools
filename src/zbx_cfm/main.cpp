@@ -7,16 +7,27 @@
 #include "aux_log.h"
 #include "prog_config.h"
 #include "zbx_api.h"
+#include "basic_mysql.h"
+
 #include "main.h"
 
 static configuration::config_map zabbix_section = {
-   { "api-url",       { true, static_cast<char *>(nullptr) } },   // Obviously for API
-   { "username",      { true, static_cast<char *>(nullptr) } },
-   { "password",      { true, static_cast<char *>(nullptr) } }
+   { "api-url",  { true, static_cast<char *>(nullptr) } },
+   { "username", { true, static_cast<char *>(nullptr) } },
+   { "password", { true, static_cast<char *>(nullptr) } }
+};
+
+static configuration::config_map mysql_section = {
+   { "host",      { true, static_cast<char *>(nullptr) } },
+   { "username",  { true, static_cast<char *>(nullptr) } },
+   { "password",  { true, static_cast<char *>(nullptr) } },
+   { "cfm-table", { true, static_cast<char *>(nullptr) } },
+   { "port",      { false, 3306 } }
 };
 
 configuration::config_map config = {
    { "snmp-community", { true, static_cast<char *>(nullptr) } },
+   { "mysql",          { true, &mysql_section  } },
    { "zabbix",         { true, &zabbix_section } }
 };
 
@@ -79,10 +90,20 @@ void snmp_get_objid(hostdata &host)
    logger.error_exit(funcname, "Timeout or error status while getting objID from '%s'", host.hostname.c_str());
 }
 
+void work_zbxs_cfm(const hostdata &host)
+{
+
+}
+
+void work_snmp_cfm(const hostdata &host)
+{
+
+}
+
 int main(int argc, char *argv[])
 {
    logger.method = logging::log_method::M_STDO;
-   if (argc < 3) logger.error_exit(progname, "Wrong argument count.\nUsage: zbx_cfm [add | delete] vlan ips ...");
+   if (argc < 3) logger.error_exit(progname, "Wrong argument count.\nUsage: zbx_cfm [add | delete] [vlan] [ip1 ip2 ...]");
 
    std::string action = argv[1];
    if ("add" != action and "del" != action)
@@ -94,21 +115,35 @@ int main(int argc, char *argv[])
    std::vector<hostdata> hosts;
    for (int i = 3; i < argc; i++) hosts.push_back(hostdata(argv[i]));
 
-   // Since some of zabbix devices can be added manually without discovering, 
-   // we have to actually poll devices to determine device type.
+   basic_mysql db(config["mysql"]["host"].str().c_str(), 
+                  config["mysql"]["username"].str().c_str(), 
+                  config["mysql"]["password"].str().c_str(),
+                  config["mysql"]["port"].intv());
    init_snmp(progname);
-   netsnmp_ds_set_int(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OID_OUTPUT_FORMAT, NETSNMP_OID_OUTPUT_NUMERIC);
+   netsnmp_ds_set_int(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OID_OUTPUT_FORMAT, NETSNMP_OID_OUTPUT_NUMERIC);   
 
    for (auto &host : hosts)
    {
+      // Since some of zabbix devices can be added manually without discovering, 
+      // we have to actually poll devices to determine device type.
       snmp_get_objid(host);
+      if (0 == db.query(true, "select alert_type from %s where objID = '%s'", 
+               config["mysql"]["cfm-table"].str().c_str(), host.objid.data()))
+         logger.error_exit(progname, "No entries in cfm-type table for devices with objID '%s'", host.objid.data());
+
+      host.alert_type = static_cast<cfm_alert_type>(strtoul(db.get(0, 0), nullptr, 10));
 
 
 
 
+
+      switch (host.alert_type)
+      {
+         case cfm_alert_type::ZBX_SENDER: work_zbxs_cfm(host); break;
+         case cfm_alert_type::SNMP_TRAP:  work_snmp_cfm(host); break;
+         default: logger.error_exit(progname, "Unexpected CFM alert type: %d", static_cast<int>(host.alert_type));
+      }
    }
-
-
 
    curl_global_cleanup();
    return 0;
