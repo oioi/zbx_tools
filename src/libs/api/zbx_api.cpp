@@ -6,13 +6,6 @@
 
 namespace zbx_api {
 
-bool api_session::json_get_uint(const char *json_path, uint_t *result)
-{
-   if (nullptr == (tok = find_json_token(arr, json_path))) return false;
-   *result = strtoul(tok->ptr, nullptr, 10);
-   return true;
-}
-
 int api_session::send_json(const char *send_buffer)
 {
    static const char *funcname = "api_session::send_json";
@@ -89,13 +82,24 @@ void api_session::init()
    active = true;
 }
 
-api_session::~api_session() noexcept
+bool api_session::json_get_uint(const char *json_path, uint_t *result)
 {
-   if (active)
-   {
-      send_plain(R"**("method":"user.logout","params":[])**");
-      if (nullptr != arr) free(arr);
-   }
+   if (nullptr == (tok = find_json_token(arr, json_path))) return false;
+   *result = strtoul(tok->ptr, nullptr, 10);
+   return true;
+}
+
+uint_t api_session::json_desc_num(const char *json_path)
+{
+   if (nullptr == (tok = find_json_token(arr, json_path))) return 0;
+   return tok->num_desc;
+}
+
+bool api_session::json_get_str(const char *json_path, buffer *buf)
+{
+   if (nullptr == (tok = find_json_token(arr, json_path))) return false;
+   buf->print("%.*s", tok->len, tok->ptr);
+   return true;
 }
 
 } // ZBX_API NAMESPACE

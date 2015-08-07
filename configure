@@ -2445,7 +2445,7 @@ fi
 ac_config_headers="$ac_config_headers include/config.h"
 
 
-CXXFLAGS='-Wall -Wextra -pedantic --std=c++11 -O2'
+CXXFLAGS='-Wall -Wextra -pedantic --std=c++11 -g'
 
 ac_ext=c
 ac_cpp='$CPP $CPPFLAGS'

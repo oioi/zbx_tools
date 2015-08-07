@@ -112,8 +112,8 @@ void read_cfg_section(config_map *section, cfg_t *cfg_sec, std::stringstream &er
          case val_type::integer:
          {
             int val;
-            if (0 == (val = cfg_getint(cfg_sec, name)) and required)
-               errors << "Required int-option '" << name << "' is not set." << std::endl;
+            if (0 == (val = cfg_getint(cfg_sec, name))) {
+               if (required) errors << "Required int-option '" << name << "' is not set." << std::endl; }
             else entry.second.set_value(val);
             break;
          }
@@ -121,8 +121,8 @@ void read_cfg_section(config_map *section, cfg_t *cfg_sec, std::stringstream &er
          case val_type::string:
          {
             char *val;
-            if (nullptr == (val = cfg_getstr(cfg_sec, name)) and required)
-               errors << "Required str-option '" << name << "' is not set." << std::endl;
+            if (nullptr == (val = cfg_getstr(cfg_sec, name))) {
+               if (required) errors << "Required str-option '" << name << "' is not set." << std::endl; }
             else entry.second.set_value(val);
             break;
          }

@@ -1,6 +1,5 @@
-**/*.Po
-**/.deps
-
+*.Po
+.deps
 *.[oa]
 *.so
 *.swp
@@ -9,14 +8,16 @@
 
 # http://www.gnu.org/software/autoconf
 
-**/Makefile
+Makefile
+stamp-h1
+
 /autom4te.cache
+config.log
+config.status
+configure.lineno
+compile
+missing
+
 # /aclocal.m4
-/compile
 # /depcomp
 # /install-sh
-/missing
-**/stamp-h1
-/config.log
-/config.status
-/configure.lineno
