@@ -282,7 +282,7 @@ void mail_message::fill_message(buffer &msgbuf)
    size_t bufsize = 0;
    char *filebuf = nullptr;
 
-   while (0 < (bytes = getline(&filebuf, &bufsize, msg_fp))) msgbuf.append(filebuf, bytes);
+   while (0 < (bytes = getline(&filebuf, &bufsize, msg_fp))) msgbuf.mappend(filebuf, bytes);
    if (!feof(msg_fp)) throw logging::error(funcname, "Error while read: %s", strerror(errno));
    if (cache_status::CACHE_MSG_FOUND == cache_state) msgbuf.append("[CR] - ");
 
@@ -296,7 +296,7 @@ void mail_message::fill_message(buffer &msgbuf)
    }
 
    msgbuf.append("Approximate processing time: %lu.%09lu\r\n", end.tv_sec, end.tv_nsec);
-   while (0 < (bytes = getline(&filebuf, &bufsize, attach_fp))) msgbuf.append(filebuf, bytes);
+   while (0 < (bytes = getline(&filebuf, &bufsize, attach_fp))) msgbuf.mappend(filebuf, bytes);
    if (!feof(msg_fp)) throw logging::error(funcname, "Error while read: %s", strerror(errno));
    free(filebuf);
 }

@@ -6,7 +6,7 @@ namespace basic_curl {
 size_t curl_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
    size_t realsize = size * nmemb;
-   static_cast<buffer *>(userp)->append(static_cast<char *>(contents), realsize);
+   static_cast<buffer *>(userp)->mappend(static_cast<char *>(contents), realsize);
    return realsize;
 }
 

@@ -1,1 +1,1 @@
-SUBDIRS = libs zbx_mail zbx_cfm
+SUBDIRS = libs llid zbx_mail zbx_cfm

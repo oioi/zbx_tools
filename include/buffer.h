@@ -25,6 +25,7 @@ class buffer
       size_type size() const { return size_; }
       size_type capacity() const { return capacity_; }
 
+      void pop_back() { if (size_ > 0) size_--; }
       void clear() { size_ = 0; }
       void setmem(char *memory, size_type capacity, size_type size);
 
@@ -34,10 +35,9 @@ class buffer
       void print(const char *format, ...) __attribute__((format(printf,2,3)));
       
       void append(char ch);
-      void append(const char *mem, size_type size);      
       void append(const char *format, ...) __attribute__((format(printf,2,3)));
 
-     
+      void mappend(const char *mem, size_type size);      
 
    private:
       std::unique_ptr<char> data_;

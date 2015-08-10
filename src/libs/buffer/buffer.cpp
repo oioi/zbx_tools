@@ -34,17 +34,29 @@ void buffer::grow(size_type min, size_type mul)
 void buffer::print_(const char *format, va_list args)
 {
    int printed, free;
-   if (0 == capacity_) grow();
+   va_list arg_copy;
+   bool grew = false;
 
+   if (0 == capacity_) grow();   
    for (;;)
    {
-      free = capacity_ - size_;
-      printed = vsnprintf(data_.get() + size_, free, format, args);
+      if (grew) va_end(arg_copy);
+      va_copy(arg_copy, args);
 
+      free = capacity_ - size_;
+      printed = vsnprintf(data_.get() + size_, free, format, arg_copy);
       if (0 > printed) throw std::runtime_error("vsnprintf() fail.");
-      if (printed >= free) { grow(printed + size_); continue; }
+
+      if (printed >= free) 
+      {
+         if (grew) throw std::runtime_error("buffer reprint failed even after growing.");
+         grow(printed + size_);
+         continue;
+      }
       break;
    }
+
+   va_end(arg_copy);
    size_ += printed;
 }
 
@@ -64,7 +76,7 @@ void buffer::append(const char *format, ...)
    va_end(args);
 }
 
-void buffer::append(const char *mem, size_type length)
+void buffer::mappend(const char *mem, size_type length)
 {
    if ((capacity_ - size_) < length) grow(size_ + length);
    memcpy(data_.get() + size_, mem, length);

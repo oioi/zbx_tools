@@ -20,6 +20,7 @@ AC_OUTPUT([
         src/libs/frozen/Makefile
         src/libs/logging/Makefile
         src/libs/mysql/Makefile
+        src/llid/Makefile
         src/zbx_mail/Makefile
 	src/zbx_cfm/Makefile
         ])

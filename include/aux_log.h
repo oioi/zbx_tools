@@ -39,6 +39,8 @@ class basic_logger
       int default_priority;
       log_method method;
 
+      basic_logger() : default_priority(LOG_INFO), method(log_method::M_SYSLOG) { }
+
       void log_vmessage(int priority, const char *funcname, const char *format, va_list args) {
          write_message(priority, funcname, format, args); }
       void log_message(int priority, const char *funcname, const char *format, ...)
