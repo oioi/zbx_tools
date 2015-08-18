@@ -1,48 +1,35 @@
 #include <vector>
 #include <sstream>
+#include <memory>
 #include <cstring>
-#include <algorithm>
 
 #include <confuse.h>
 
 #include "aux_log.h"
 #include "prog_config.h"
 
-namespace configuration {
+namespace conf {
 
-static std::unordered_map<std::type_index, std::vector<std::type_index>> allowed_types = {
-   { std::type_index(typeid(config_map *)), { std::type_index(typeid(config_map *)) } },
-   { std::type_index(typeid(int)),          { std::type_index(typeid(int)) } },
-   { std::type_index(typeid(std::string)),  { std::type_index(typeid(std::string)), std::type_index(typeid(char *)) } }
+using section_ptrs = std::vector<std::unique_ptr<cfg_opt_t>>;
+const std::vector<std::vector<std::type_index>> allowed_types {
+   { std::type_index(typeid(integer_t)) },
+   { std::type_index(typeid(string_t)), std::type_index(typeid(char *)) },
+   { std::type_index(typeid(multistring_t)) },
+   { std::type_index(typeid(section_t *)) }
 };
 
 void config_entry::check_type(const std::type_info &requested) const
 {
    static const char *funcname = "config_entry::check_type";
 
-   const std::type_info *current;
-
-   switch (type)
-   {
-      case val_type::unknown:
-         throw logging::error(funcname, "Attempt to access unknown-type config value.");
-      default:
-         throw logging::error(funcname, "Unexpected value type: %u", static_cast<int>(type));
-
-      case val_type::section: current = &typeid(config_map *);  break;
-      case val_type::string:  current = &typeid(std::string);   break;
-      case val_type::integer: current = &typeid(int);        break;
-   }
-
-   for (auto &index : allowed_types[std::type_index(*current)])
+   if (type == val_type::unknown) throw logging::error(funcname, "Attempt to access unknown-type config value.");
+   for (auto &index : allowed_types[static_cast<int>(type)])
       if (index == std::type_index(requested)) return;
-
-   throw logging::error(funcname, "Request type mismatch with current value. Requested: %s.",
-                        requested.name());
+   throw logging::error(funcname, "Request type mismatch with current value. Requested: %s.", requested.name());
 }
 
 template <typename T>
-void config_entry::set_value(const T& newval)
+void config_entry::set(const T& newval)
 {
    static const char *funcname = "config_entry::set_value";
 
@@ -53,12 +40,12 @@ void config_entry::set_value(const T& newval)
    value = newval;
 }
 
-cfg_opt_t * build_section(config_map *section, std::vector<cfg_opt_t *> &ptrs)
+cfg_opt_t * build_section(section_t *section, section_ptrs &ptrs)
 {
-   static const char *funcname = "configuration::build_section";
+   static const char *funcname = "conf::build_section";
 
    cfg_opt_t *ptr = new cfg_opt_t[section->size() + 1];
-   ptrs.push_back(ptr);
+   ptrs.push_back(std::unique_ptr<cfg_opt_t>(ptr));
 
    for (auto &entry : *section)
    {
@@ -73,6 +60,13 @@ cfg_opt_t * build_section(config_map *section, std::vector<cfg_opt_t *> &ptrs)
             break;
          }
 
+         case val_type::multistring:
+         {
+            cfg_opt_t temp = CFG_STR_LIST(name, 0, CFGF_NODEFAULT);
+            *ptr = temp;
+            break;
+         }
+
          case val_type::integer:
          {
             cfg_opt_t temp = CFG_INT(name, 0, CFGF_NODEFAULT);
@@ -82,7 +76,7 @@ cfg_opt_t * build_section(config_map *section, std::vector<cfg_opt_t *> &ptrs)
 
          case val_type::section:
          {
-            cfg_opt_t temp = CFG_SEC(name, build_section(entry.second.map(), ptrs), CFGF_NONE);
+            cfg_opt_t temp = CFG_SEC(name, build_section(entry.second.get<conf::section_t *>(), ptrs), CFGF_NONE);
             *ptr = temp;
             break;
          }
@@ -95,12 +89,12 @@ cfg_opt_t * build_section(config_map *section, std::vector<cfg_opt_t *> &ptrs)
 
    cfg_opt_t temp = CFG_END();
    *ptr = temp;
-   return ptrs.back();
+   return ptrs.back().get();
 }
 
-void read_cfg_section(config_map *section, cfg_t *cfg_sec, std::stringstream &errors)
+void read_cfg_section(section_t *section, cfg_t *cfg_sec, std::stringstream &errors)
 {
-   static const char *funcname = "configuration::read_cfg_section";
+   static const char *funcname = "conf::read_cfg_section";
 
    for (auto &entry : *section)
    {
@@ -111,10 +105,10 @@ void read_cfg_section(config_map *section, cfg_t *cfg_sec, std::stringstream &er
       {
          case val_type::integer:
          {
-            int val;
+            integer_t val;
             if (0 == (val = cfg_getint(cfg_sec, name))) {
                if (required) errors << "Required int-option '" << name << "' is not set." << std::endl; }
-            else entry.second.set_value(val);
+            else entry.second.set(val);
             break;
          }
 
@@ -123,12 +117,28 @@ void read_cfg_section(config_map *section, cfg_t *cfg_sec, std::stringstream &er
             char *val;
             if (nullptr == (val = cfg_getstr(cfg_sec, name))) {
                if (required) errors << "Required str-option '" << name << "' is not set." << std::endl; }
-            else entry.second.set_value(val);
+            else entry.second.set(val);
+            break;
+         }
+
+         case val_type::multistring:
+         {
+            if (nullptr == cfg_getstr(cfg_sec, name)) {
+               if (required) errors << "Required multistr-option '" << name << "' is not set." << std::endl; }
+            else
+            {
+               int count = cfg_size(cfg_sec, name);
+               multistring_t strs;
+
+               for (int i = 0; i < count; i++) 
+                  strs.push_back(std::move(string_t(cfg_getnstr(cfg_sec, name, i))));
+               entry.second.set(strs);
+            }
             break;
          }
 
          case val_type::section:
-            read_cfg_section(entry.second.map(), cfg_getsec(cfg_sec, name), errors);
+            read_cfg_section(entry.second.get<conf::section_t *>(), cfg_getsec(cfg_sec, name), errors);
             break;
 
          case val_type::unknown:
@@ -142,16 +152,14 @@ void cfg_error_fnc(cfg_t *cfg, const char *format, va_list ap)
    logger.log_vmessage(LOG_ERR, "cfg_parse", format, ap);
 }
 
-int read_config(const char *filename, config_map &config)
+int read_config(const char *filename, section_t &config)
 {
-   static const char *funcname = "configuration::read_config";
+   static const char *funcname = "conf::read_config";
 
-   // Assuming that we have at least one section.
-   // This function won't be called if there is nothing to read, right?      
-   std::vector<cfg_opt_t *> section_ptrs;
-   build_section(&config, section_ptrs);
+   section_ptrs ptrs;
+   build_section(&config, ptrs);
 
-   cfg_t *cfg = cfg_init(section_ptrs[0], CFGF_NONE);
+   cfg_t *cfg = cfg_init(ptrs[0].get(), CFGF_NONE);
    cfg_set_error_function(cfg, cfg_error_fnc);
 
    switch(cfg_parse(cfg, filename))
@@ -168,7 +176,6 @@ int read_config(const char *filename, config_map &config)
 
    std::stringstream errors;
    read_cfg_section(&config, cfg, errors);
-   std::for_each(section_ptrs.begin(), section_ptrs.end(), [](cfg_opt_t *x) { delete [] x; });
    cfg_free(cfg);
 
    errors.peek();

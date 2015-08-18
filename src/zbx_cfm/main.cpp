@@ -15,18 +15,18 @@
 
 namespace {
    configuration::config_map zabbix_section = {
-      { "api-url",      { true, static_cast<char *>(nullptr) } },
-      { "username",     { true, static_cast<char *>(nullptr) } },
-      { "password",     { true, static_cast<char *>(nullptr) } },
-      { "item-history", { false, 7 } }
+      { "api-url",      { conftype::string     } },
+      { "username",     { configuration::val_type::string     } },
+      { "password",     { configuration::val_type::string     } },
+      { "item-history", { configuration::val_type::integer, 7 } }
    };
 
    configuration::config_map mysql_section = {
-      { "host",      { true, static_cast<char *>(nullptr) } },
-      { "username",  { true, static_cast<char *>(nullptr) } },
-      { "password",  { true, static_cast<char *>(nullptr) } },
-      { "cfm-table", { true, static_cast<char *>(nullptr) } },
-      { "port",      { false, 3306 } }
+      { "host",      { configuration::val_type::string        } },
+      { "username",  { configuration::val_type::string        } },
+      { "password",  { configuration::val_type::string        } },
+      { "cfm-table", { configuration::val_type::string        } },
+      { "port",      { configuration::val_type::integer, 3306 } }
    };
 
    const char *progname = "zbx_cfm";
@@ -40,10 +40,10 @@ namespace {
 }
 
 configuration::config_map config = {
-   { "mysql",           { true, &mysql_section  } },
-   { "zabbix",          { true, &zabbix_section } },
-   { "snmp-community",  { true, static_cast<char *>(nullptr) } },
-   { "cfm-aplname",     { false, "CFM" } }
+   { "mysql",           { configuration::val_type::section, &mysql_section  } },
+   { "zabbix",          { configuration::val_type::section, &zabbix_section } },
+   { "snmp-community",  { configuration::val_type::string                   } },
+   { "cfm-aplname",     { configuration::val_type::string, "CFM"            } }
 };
 
 void snmp_get_objid(hostdata &host)
@@ -59,8 +59,8 @@ void snmp_get_objid(hostdata &host)
    snmp_sess.peername = const_cast<char *>(host.hostname.c_str());
 
    // Fuck that shit, net-snmp
-   snmp_sess.community = (u_char *) config["snmp-community"].str().c_str();
-   snmp_sess.community_len = config["snmp-community"].str().size();
+   snmp_sess.community = (u_char *) config["snmp-community"].get<std::string>().c_str();
+   snmp_sess.community_len = config["snmp-community"].get<std::string>().size();
 
    if (nullptr == (sessp = snmp_open(&snmp_sess)))
    {
@@ -143,7 +143,7 @@ void check_cfm_application(hostdata &host)
    {
       tempbuf.print("result[%lu].name", i);
       if (false == zbx_sess.json_get_str(tempbuf.data(), &cfm_name)) break;
-      if (0 != strcmp(cfm_name.data(), config["cfm-aplname"].str().c_str())) continue;
+      if (0 != strcmp(cfm_name.data(), config["cfm-aplname"].get<std::string>().c_str())) continue;
 
       tempbuf.print("result[%lu].applicationid", i);
       if (false == zbx_sess.json_get_uint(tempbuf.data(), &(host.application_id)))
@@ -170,7 +170,7 @@ void snmp_trap_prepare(hostdata &host, basic_mysql &db)
    static const std::string host_str = "%HOST%";
 
    db.query(true, "select trap_item, trigger_regex from %s where objID = '%s'",
-         config["mysql"]["cfm-table"].str().c_str(), host.objid.data());
+         config["mysql"]["cfm-table"].get<std::string>().c_str(), host.objid.data());
    host.item_name = db.get(0, 0);
    host.trigger_expr = db.get(0, 1);
 
@@ -217,7 +217,7 @@ void deploy_zabbix_cfm(hostdata &host)
       zbx_sess.send_vstr(R"**(
          "method": "application.create",
          "params": { "name": "%s", "hostid": "%lu" }
-      )**", config["cfm-aplname"].str().c_str(), host.host_id);
+      )**", config["cfm-aplname"].get<std::string>().c_str(), host.host_id);
 
       if (false == zbx_sess.json_get_uint("result.applicationids[0]", &(host.application_id)))
          throw logging::error(funcname, "Looks like CFM application creation failed");
@@ -239,7 +239,7 @@ void deploy_zabbix_cfm(hostdata &host)
          )**", vlan.c_str(), host.item_name.c_str(), host.host_id,
          static_cast<unsigned int>(zbx_api::item::type::ZBX_TRAPPER),
          static_cast<unsigned int>(zbx_api::item::value_type::TEXT),
-         config["zabbix"]["item-history"].intv(), host.application_id);
+         config["zabbix"]["item-history"].get<int>(), host.application_id);
          break;
 
       case cfm_alert_type::SNMP_TRAP:
@@ -259,7 +259,7 @@ void deploy_zabbix_cfm(hostdata &host)
             )**", host.item_name.c_str(), host.host_id,
             static_cast<unsigned int>(zbx_api::item::type::SNMP_TRAP),
             static_cast<unsigned int>(zbx_api::item::value_type::LOG),
-            config["zabbix"]["item-history"].intv(),
+            config["zabbix"]["item-history"].get<int>(),
             host.interface_id, host.application_id);
          }
          break;
@@ -343,17 +343,17 @@ int main(int argc, char *argv[])
    std::vector<hostdata> hosts;
    for (int i = 3; i < argc; i++) hosts.push_back(hostdata(argv[i]));
 
-   basic_mysql db(config["mysql"]["host"].str().c_str(), 
-                  config["mysql"]["username"].str().c_str(), 
-                  config["mysql"]["password"].str().c_str(),
-                  config["mysql"]["port"].intv());
+   basic_mysql db(config["mysql"]["host"].get<std::string>().c_str(), 
+                  config["mysql"]["username"].get<std::string>().c_str(), 
+                  config["mysql"]["password"].get<std::string>().c_str(),
+                  config["mysql"]["port"].get<int>());
    init_snmp(progname);
    netsnmp_ds_set_int(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OID_OUTPUT_FORMAT, NETSNMP_OID_OUTPUT_NUMERIC);
 
    curl_global_init(CURL_GLOBAL_ALL);
-   zbx_sess.set_auth(config["zabbix"]["api-url"].str(),
-                     config["zabbix"]["username"].str(),
-                     config["zabbix"]["password"].str());
+   zbx_sess.set_auth(config["zabbix"]["api-url"].get<std::string>(),
+                     config["zabbix"]["username"].get<std::string>(),
+                     config["zabbix"]["password"].get<std::string>());
 
    // First we do everything that can be done without actually creating/deleting anything.
    for (auto &host: hosts)
@@ -364,7 +364,7 @@ int main(int argc, char *argv[])
       get_zbx_hostdata(host);
 
       if (0 == db.query(true, "select alert_type from %s where objID = '%s'", 
-               config["mysql"]["cfm-table"].str().c_str(), host.objid.data()))
+               config["mysql"]["cfm-table"].get<std::string>().c_str(), host.objid.data()))
          logger.error_exit(progname, "No entries in cfm-type table for devices with objID '%s'", host.objid.data());      
 
 

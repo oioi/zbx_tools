@@ -4,14 +4,17 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <chrono>
 
 #include <openssl/md5.h>
 
-#include "time.h"
 #include "typedef.h"
 #include "buffer.h"
 
 namespace mail {
+
+using sys_clock = std::chrono::system_clock;
+using sted_clock = std::chrono::steady_clock;
 
 struct emb_image
 {
@@ -28,30 +31,31 @@ struct callback_struct
 };
 
 enum class cache_status {
-   CACHE_UNKNOWN = 0,
-   CACHE_MSG_FOUND,
-   CACHE_MSG_NOTFOUND,
-   CACHE_UNACCESSIBLE
+   cache_unknown = 0,
+   cache_msg_found,
+   cache_msg_notfound,
+   cache_unaccessible
 };
 
 class mail_message
 {
    public:
-      mail_message() : cache_state(cache_status::CACHE_UNKNOWN), msg_fp(nullptr), error_id(0) { }
+      mail_message() : cache_state(cache_status::cache_unknown), msg_fp(nullptr), error_id(0) { }
 
-      inline void set_start() { clock_gettime(CLOCK_MONOTONIC, &start); }
-      inline void add_line(const std::string &str) { body += str; }
+      void set_start() { time_start = sted_clock::now(); }
+      void add_line(const std::string &str) { body += str; }
 
-      inline void set_to(const char *str) { to = str; }
-      inline void set_to(const std::string &str) { to = str; }
+      void set_to(const char *str) { to = str; }
+      void set_to(const std::string &str) { to = str; }
 
-      inline void set_subject(const char *str) { subject = str;  }
-      inline void set_subject(const std::string &str) { subject = str;  }      
+      void set_subject(const char *str) { subject = str;  }
+      void set_subject(const std::string &str) { subject = str;  }      
 
-      inline void set_from(const char *str) { from = str; }
-      inline void set_from(const std::string &str) { from = str; }
+      void set_from(const char *str) { from = str; }
+      void set_from(const std::string &str) { from = str; }
 
-      inline const std::string & get_eid() const { return eid_str; }
+      const std::string & get_eid() const { return eid_str; }
+      cache_status cache() const { return cache_state; }
 
       void add_error(const char *format, ...) __attribute__((format(printf,2,3)));
       void add_post(const char *format, ...) __attribute__((format(printf,2,3)));      
@@ -59,10 +63,10 @@ class mail_message
 
       cache_status try_cache(const char *body);
       void generate_message();
-      void send();
+      void send(const char *body = nullptr);
 
    private:
-      struct timespec start;
+      sted_clock::time_point time_start;
       char digest_string[(MD5_DIGEST_LENGTH * 2) + 1];
 
       cache_status cache_state;

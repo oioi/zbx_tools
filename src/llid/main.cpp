@@ -1,6 +1,7 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 
+#include <string>
 #include <vector>
 
 #include "typedef.h"
@@ -21,18 +22,16 @@ namespace {
       ethernetCsmacd = 6,
       gigabitEthernet = 117
    };
-
-   const char *progname = "llid";   
 }
 
 std::string escape_string(const char *string, size_t size)
 {
-   std::size_t pos;
    std::string result;
+   std::size_t pos = std::string::npos;   
 
    result.append(string, size);
-   while (std::string::npos != (pos = result.find('"')))
-      result.replace(pos, 1, "\\\"");
+   while (std::string::npos != (pos = result.find('"', (pos == std::string::npos) ? 0 : pos + 2)))
+      result.replace(pos, sizeof(char), "\\\"");
    return result;
 }
 
@@ -103,7 +102,7 @@ std::vector<uint_t> get_host_interfaces(snmp_session *sessp)
    } // infinite loop
 }
 
-int get_interface_data(uint_t number, netsnmp_variable_list *vars, buffer &json_data)
+void get_interface_data(uint_t number, netsnmp_variable_list *vars, buffer &json_data)
 {
    static const char *funcname = "parse_interface_data";
 
@@ -113,29 +112,28 @@ int get_interface_data(uint_t number, netsnmp_variable_list *vars, buffer &json_
       {
          case 0:
             if (ASN_INTEGER != vars->type) throw logging::error(funcname, "Unexpected ASN type in answer to ifOperStatus");
-            if (1 != *(vars->val.integer)) return 0;
+            if (1 != *(vars->val.integer)) return;
             break;
 
          case 1:
             if (ASN_OCTET_STR != vars->type) throw logging::error(funcname, "Unexpected ASN type in answer to ifName");
-            json_data.append("{\"{#IFINDEX}\":\"%lu\", \"{#IFNAME}\":\"%s\", ", number, 
+            json_data.append("{\"{#IFINDEX}\":\"%lu\",\"{#IFNAME}\":\"%s\",", number, 
                   (escape_string((const char *) vars->val.string, vars->val_len)).c_str());
             break;
 
          case 2:
             if (ASN_OCTET_STR != vars->type) throw logging::error(funcname, "Unexpected ASN type in answer to ifAlias");
-            json_data.append("\"{#IFALIAS}\":\"%s\", ", (escape_string((const char *) vars->val.string, vars->val_len)).c_str());
+            json_data.append("\"{#IFALIAS}\":\"%s\",", (escape_string((const char *) vars->val.string, vars->val_len)).c_str());
             break;
 
          case 3:
             if ((ASN_APPLICATION | ASN_INTEGER) != vars->type) throw logging::error(funcname, "Unexpected ASN type in answer to ifHighSpeed");
-            json_data.append("\"{#IFSPEED}\":\"%ld\"}", *(vars->val.integer));
+            json_data.append("\"{#IFSPEED}\":\"%ld\"},", *(vars->val.integer));
             break;
 
          default: throw logging::error(funcname, "Unexpected step number while parsing host response");
       }
    }
-   return 1;
 }
 
 buffer process_interfaces(snmp_session *sessp, const std::vector<uint_t> &interfaces)
@@ -149,7 +147,7 @@ buffer process_interfaces(snmp_session *sessp, const std::vector<uint_t> &interf
 
    buffer json_data;
    netsnmp_pdu *response = nullptr;
-   netsnmp_pdu *request = snmp_pdu_create(SNMP_MSG_GETBULK);
+   netsnmp_pdu *request;
 
    json_data.print("{\"data\":[");
    for (auto int_number : interfaces)
@@ -170,7 +168,7 @@ buffer process_interfaces(snmp_session *sessp, const std::vector<uint_t> &interf
       if (STAT_SUCCESS == snmp_synch_response(sessp, request, &response) and
           SNMP_ERR_NOERROR == response->errstat)
       {
-         try { if(get_interface_data(int_number, response->variables, json_data)) json_data.append(','); }
+         try { get_interface_data(int_number, response->variables, json_data); }
          catch (logging::error &error) { logger.error_exit(funcname, "%s: %s", sessp->peername, error.what()); }
       }
       else logger.error_exit(funcname, "Some snmp error when requesting additional int info from host '%s'", sessp->peername);
@@ -183,6 +181,7 @@ buffer process_interfaces(snmp_session *sessp, const std::vector<uint_t> &interf
 
 int main(int argc, char *argv[])
 {
+   const char *progname = "llid";   
    openlog(progname, LOG_PID, LOG_LOCAL7);
    if (3 != argc) logger.error_exit(progname, "%s: should be called with exactly two arguments: [ip] [snmp_community]", argv[0]);
    if (0 == strcmp("127.0.0.1", argv[1])) return 0;

@@ -37,32 +37,6 @@ size_t callback_read(void *ptr, size_t size, size_t nmemb, void *userp)
    return send;
 }
 
-void cache_cleanup()
-{
-   static const char *funcname = "cache_cleanup";
-
-   DIR *dirp;
-   struct dirent *entry;
-   struct stat filestat;
-   time_t rawtime = time(nullptr);
-
-   if (nullptr == (dirp = opendir(config["cache-dir"].str().c_str())))
-      throw logging::error(funcname, "Cannot open cache directory '%s' : %s",
-            config["cache-dir"].str().c_str(), strerror(errno));
-
-   std::string filename;
-   while (nullptr != (entry = readdir(dirp)))
-   {
-      if (nullptr == strstr(entry->d_name, msg_ext.c_str())) continue;
-      filename = config["cache-dir"].str() + '/';
-      filename += entry->d_name;
-
-      if (-1 == stat(filename.c_str(), &filestat))
-         throw logging::error(funcname, "Error after stat '%s' : %s", filename.c_str(), strerror(errno));
-      if ((rawtime - filestat.st_atime) > config["cache-timeout"].intv()) remove(filename.c_str());
-   }
-}
-
 void mail_message::add_error(const char *format, ...)
 {
    va_list args;   
@@ -94,6 +68,31 @@ void mail_message::add_image(const char *name, const char *data, size_t size)
    imgs.push_back(std::move(eimage));
 }
 
+void cache_cleanup()
+{
+   static const char *funcname = "cache_cleanup";
+
+   DIR *dirp;
+   struct dirent *entry;
+   struct stat filestat;
+
+   if (nullptr == (dirp = opendir(config["cache-dir"].get<conf::string_t>().c_str())))
+      throw logging::error(funcname, "Cannot open cache directory '%s' : %s",
+            config["cache-dir"].get<conf::string_t>().c_str(), strerror(errno));
+
+   std::string filename;
+   while (nullptr != (entry = readdir(dirp)))
+   {
+      if (nullptr == strstr(entry->d_name, msg_ext.c_str())) continue;
+      filename = config["cache-dir"].get<conf::string_t>() + '/';
+      filename += entry->d_name;
+
+      if (-1 == stat(filename.c_str(), &filestat))
+         throw logging::error(funcname, "Error after stat '%s' : %s", filename.c_str(), strerror(errno));
+      if ((sys_clock::to_time_t(sys_clock::now()) - filestat.st_atime) > config["cache-timeout"].get<conf::integer_t>()) remove(filename.c_str());
+   }
+}
+
 cache_status mail_message::get_cache_stat(std::string &filename)
 {
    static const char *funcname = "mail_message::get_cache_stat";
@@ -103,28 +102,26 @@ cache_status mail_message::get_cache_stat(std::string &filename)
    {
       if (ENOENT == errno)
       {
-         if (-1 == stat(config["cache-dir"].str().c_str(), &cache_stat))
+         if (-1 == stat(config["cache-dir"].get<conf::string_t>().c_str(), &cache_stat))
          {
             logger.log_message(LOG_ERR, funcname, "Configuired cache dir '%s' is probably wrong. "
-                               "Can't access it: %s", config["cache-dir"].str().c_str(), strerror(errno));
-            return cache_status::CACHE_UNACCESSIBLE;
+                               "Can't access it: %s", config["cache-dir"].get<conf::string_t>().c_str(), strerror(errno));
+            return cache_status::cache_unaccessible;
          }
-         return cache_status::CACHE_MSG_NOTFOUND;
+         return cache_status::cache_msg_notfound;
       }
 
       throw logging::error(funcname, "Can't get filestat for cache-file '%s' : %s",
                            filename.c_str(), strerror(errno));
    }
 
-
-   time_t rawtime = time(nullptr);
-   if ((rawtime - cache_stat.st_atime) > config["cache-timeout"].intv())
+   if ((sys_clock::to_time_t(sys_clock::now()) - cache_stat.st_atime) > config["cache-timeout"].get<conf::integer_t>())
    {
       remove(filename.c_str());
-      return cache_status::CACHE_MSG_NOTFOUND;
+      return cache_status::cache_msg_notfound;
    }
 
-   return cache_status::CACHE_MSG_FOUND;
+   return cache_status::cache_msg_found;
 }
 
 void mail_message::open_cache(const std::string &filename, const char *mode)
@@ -154,14 +151,14 @@ cache_status mail_message::try_cache(const char *body)
    for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
       sprintf(digest_string + i*2, "%02x", digest[i]);
 
-   cache_filename = config["cache-dir"].str() + '/';
+   cache_filename = config["cache-dir"].get<conf::string_t>() + '/';
    cache_filename.append(digest_string, MD5_DIGEST_LENGTH * 2);
    cache_filename += ".msg";
 
    cache_state = get_cache_stat(cache_filename);
 
-   if (cache_status::CACHE_UNACCESSIBLE == cache_state) return cache_state;
-   if (cache_status::CACHE_MSG_FOUND == cache_state)
+   if (cache_status::cache_unaccessible == cache_state) return cache_state;
+   if (cache_status::cache_msg_found == cache_state)
    {
       open_cache(cache_filename, "r");
       return cache_state;
@@ -187,7 +184,7 @@ cache_status mail_message::try_cache(const char *body)
    if (EWOULDBLOCK != errno)
       throw logging::error("Cannot set flock due to unexpected error '%s' : %s", tmp_filename.c_str(), strerror(errno));
 
-   for (int i = 0; cache_status::CACHE_MSG_NOTFOUND == get_cache_stat(cache_filename); i++)
+   for (int i = 0; cache_status::cache_msg_notfound == get_cache_stat(cache_filename); i++)
    {
       sleep(i);
       if (i > 10) throw logging::error(funcname, "Still no result after 10 tries of waiting on cache file '%s'", cache_filename.c_str());
@@ -201,14 +198,16 @@ void mail_message::generate_message()
 {
    static const char *funcname = "mail_message::generate_message";
 
-   if (cache_status::CACHE_UNACCESSIBLE == cache_state)
+   if (cache_status::cache_unaccessible == cache_state)
    {
       if (nullptr == (msg_fp = tmpfile()))
          throw logging::error(funcname, "Failed to create temporary file: %s", strerror(errno));
+      if (nullptr == (attach_fp = tmpfile()))
+         throw logging::error(funcname, "Failed to create temporary file: %s", strerror(errno));      
    }
 
    std::string line;
-   std::string fullfrom = config["smtp-from-name"].str() + config["smtp-from"].str();
+   std::string fullfrom = config["smtp-from-name"].get<conf::string_t>() + config["smtp-from"].get<conf::string_t>();
 
    fprintf(msg_fp, "From: %s\r\n"
                    "Subject: %s\r\n"
@@ -251,19 +250,14 @@ void mail_message::generate_message()
       BIO_free_all(b64);
    }
 
-   timespec end;
-   clock_gettime(CLOCK_MONOTONIC, &end);
-   end.tv_sec -= start.tv_sec;
-   if (0 > (end.tv_nsec -= start.tv_nsec))
-   {
-      end.tv_sec -= 1;
-      end.tv_nsec += 1000000000;
-   }
-   fprintf(msg_fp, "<br><br> --- <br>ZBXM Cache ID: %s<br>Generated in: %lu.%09lu<br>", digest_string, end.tv_sec, end.tv_nsec);
+
+   std::chrono::duration<double> elapsed = sys_clock::now() - time_start;
+   fprintf(msg_fp, "<br><br> --- <br>ZBXM Cache ID: %s<br>Generated in: %f<br>", digest_string, elapsed.count());
 
    fflush(msg_fp);
    fflush(attach_fp);
 
+   if (cache_status::cache_unaccessible == cache_state) return;
    std::string tmpname = cache_filename + ".tmp";
    if (-1 == rename(tmpname.c_str(), cache_filename.c_str()))
       throw logging::error(funcname, "Rename '%s'-'%s' failed: %s",
@@ -284,49 +278,56 @@ void mail_message::fill_message(buffer &msgbuf)
 
    while (0 < (bytes = getline(&filebuf, &bufsize, msg_fp))) msgbuf.mappend(filebuf, bytes);
    if (!feof(msg_fp)) throw logging::error(funcname, "Error while read: %s", strerror(errno));
-   if (cache_status::CACHE_MSG_FOUND == cache_state) msgbuf.append("[CR] - ");
+   if (cache_status::cache_msg_found == cache_state) msgbuf.append("[CR] - ");
 
-   timespec end;
-   clock_gettime(CLOCK_MONOTONIC, &end);
-   end.tv_sec -= start.tv_sec;
-   if (0 > (end.tv_nsec -= start.tv_nsec))
-   {
-      end.tv_sec -= 1;
-      end.tv_nsec += 1000000000;
-   }
+   std::chrono::duration<double> elapsed = sys_clock::now() - time_start;
+   msgbuf.append("Approximate processing time: %f\r\n", elapsed.count());
 
-   msgbuf.append("Approximate processing time: %lu.%09lu\r\n", end.tv_sec, end.tv_nsec);
    while (0 < (bytes = getline(&filebuf, &bufsize, attach_fp))) msgbuf.mappend(filebuf, bytes);
    if (!feof(msg_fp)) throw logging::error(funcname, "Error while read: %s", strerror(errno));
    free(filebuf);
 }
 
-void mail_message::send()
+void mail_message::send(const char *body)
 {
    static const char *funcname = "mail_message::send";
 
-   buffer message;
    CURL *curl;
    CURLcode res;
-
-   fill_message(message);
-   callback_struct cbs(0, &message);
 
    if (nullptr == (curl = curl_easy_init()))
      throw logging::error(funcname, "curl_easy_init failed");
 
-   curl_easy_setopt(curl, CURLOPT_URL, config["smtp-host"].str().c_str());
+   curl_easy_setopt(curl, CURLOPT_URL, config["smtp-host"].get<conf::string_t>().c_str());
    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from.c_str());
    struct curl_slist *recipients = curl_slist_append(nullptr, to.c_str());
    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
 
+   buffer message;
+   callback_struct cbs(0, &message);
+
+   if (nullptr == body) fill_message(message);
+   else
+   {
+      std::string fullfrom = config["smtp-from-name"].get<conf::string_t>() + config["smtp-from"].get<conf::string_t>();
+      message.print("From: %s\r\n"
+                    "Subject: %s\r\n"
+                    "Mime-Version: 1.0\r\n"
+                    "Content-Type: multipart/mixed; boundary=\"%s\"\r\n"
+                    "\r\n"
+                    "--%s\r\n"
+                    "Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n"
+                    "%s\n",
+                    fullfrom.c_str(), subject.c_str(), 
+                    digest_string, digest_string, body);
+   }
+
    curl_easy_setopt(curl, CURLOPT_READFUNCTION, callback_read);
    curl_easy_setopt(curl, CURLOPT_READDATA, &cbs);
-   curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+   curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L); 
 
    if (CURLE_OK != (res = curl_easy_perform(curl)))
       throw logging::error(funcname, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-
    curl_slist_free_all(recipients);
    curl_easy_cleanup(curl);   
 }
