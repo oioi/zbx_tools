@@ -78,9 +78,10 @@ void buffer::append(const char *format, ...)
 
 void buffer::mappend(const char *mem, size_type length)
 {
-   if ((capacity_ - size_) < length) grow(size_ + length);
+   if ((capacity_ - size_) < length + 1) grow(size_ + length + 1);
    memcpy(data_.get() + size_, mem, length);
    size_ += length;
+   data_.get()[size_] = '\0';
 }
 
 void buffer::append(char ch)

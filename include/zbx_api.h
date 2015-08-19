@@ -10,50 +10,50 @@ namespace zbx_api {
 namespace item {
 
    enum class type : unsigned int {
-      ZBX_AGENT,
-      SNMPV1_AGENT,
-      ZBX_TRAPPER,
-      SIMPLE_CHECK,
-      SNMPV2_AGENT,
-      ZABBIX_INTERNAL,
-      SNMPV3_AGENT,
-      ZBX_AGENT_ACTIVE,
-      ZBX_AGGREGATE,
-      WEB_ITEM,
-      EXTERNAL_CHECK,
-      DB_MONITOR,
-      IPMI_AGENT,
-      SSH_AGENT,
-      TELNET_AGENT,
-      CALCULATED,
-      JMX_AGENT,
-      SNMP_TRAP
+      zbx_agent,
+      snmpv1_agent,
+      zbx_trapper,
+      simple_check,
+      snmpv2_agent,
+      zabbix_internal,
+      snmpv3_agent,
+      zbx_agent_active,
+      zbx_aggregate,
+      web_item,
+      external_check,
+      db_monitor,
+      ipmi_agent,
+      ssh_agent,
+      telnet_agent,
+      calculated,
+      jmx_agent,
+      snmp_trap
    };
 
    enum class value_type : unsigned int {
-      FLOAT,
-      CHAR,
-      LOG,
-      UNSIGNED,
-      TEXT
+      float_t,
+      char_t,
+      log_t,
+      unsigned_t,
+      text_t
    };
 
 } // ITEM NAMESPACE
 
 enum class host_interface_type {
-   ZBX_AGENT = 1,
-   ZBX_SNMP,
-   ZBX_IPMI,
-   ZBX_JMX
+   zbx_agent = 1,
+   zbx_snmp,
+   zbx_ipmi,
+   zbx_jmx
 };
 
 enum class trigger_severity : unsigned int {
-   NOT_CLASSIFIED,
-   INFORMATION,
-   WARNING,
-   AVERAGE,
-   HIGH,
-   DISASTER
+   not_classified,
+   information,
+   warning,
+   average,
+   high,
+   disaster
 };
 
 class api_session

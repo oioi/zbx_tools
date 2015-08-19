@@ -1,6 +1,9 @@
 #ifndef ZBX_CFM_MAN_H
 #define ZBX_CFM_MAN_H
 
+#include <string>
+#include <map>
+
 #include "buffer.h"
 #include "typedef.h"
 
@@ -9,8 +12,8 @@ enum {
 };
 
 enum class cfm_alert_type : int {
-   ZBX_SENDER = 1,
-   SNMP_TRAP
+   zbx_sender = 1,
+   snmp_trap
 };
 
 struct hostdata
@@ -24,10 +27,15 @@ struct hostdata
    uint_t application_id;
    uint_t item_count;
 
+   uint_t item_id;
+   uint_t trigger_id;
+
    cfm_alert_type alert_type;
    std::string item_name;
    std::string trigger_expr;
    bool trap_item_exist;
+
+   std::map<std::string, std::string> macros;
 
    hostdata(const char *hostname_) : hostname(hostname_), host_id(0), 
       interface_id(0), application_id(0), trap_item_exist(false) { }

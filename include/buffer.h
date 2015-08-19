@@ -25,7 +25,7 @@ class buffer
       size_type size() const { return size_; }
       size_type capacity() const { return capacity_; }
 
-      void pop_back() { if (size_ > 0) size_--; }
+      void pop_back() { if (size_ > 0) { size_--; data_.get()[size_] = '\0'; } }
       void clear() { size_ = 0; }
       void setmem(char *memory, size_type capacity, size_type size);
 
