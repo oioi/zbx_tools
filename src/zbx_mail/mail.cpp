@@ -251,7 +251,7 @@ void mail_message::generate_message()
    }
 
 
-   std::chrono::duration<double> elapsed = sys_clock::now() - time_start;
+   std::chrono::duration<double> elapsed = sted_clock::now() - time_start;
    fprintf(msg_fp, "<br><br> --- <br>ZBXM Cache ID: %s<br>Generated in: %f<br>", digest_string, elapsed.count());
 
    fflush(msg_fp);
@@ -280,7 +280,7 @@ void mail_message::fill_message(buffer &msgbuf)
    if (!feof(msg_fp)) throw logging::error(funcname, "Error while read: %s", strerror(errno));
    if (cache_status::cache_msg_found == cache_state) msgbuf.append("[CR] - ");
 
-   std::chrono::duration<double> elapsed = sys_clock::now() - time_start;
+   std::chrono::duration<double> elapsed = sted_clock::now() - time_start;
    msgbuf.append("Approximate processing time: %f\r\n", elapsed.count());
 
    while (0 < (bytes = getline(&filebuf, &bufsize, attach_fp))) msgbuf.mappend(filebuf, bytes);
