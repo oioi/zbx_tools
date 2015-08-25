@@ -246,7 +246,7 @@ void deploy_zabbix_cfm(hostdata &host)
                "hostid": "%lu",
                "type": %u,
                "value_type": %u,
-               "history": %lu,
+               "history": %d,
                "applications": [ "%lu" ] }
          )**", vlan.c_str(), host.item_name.c_str(), host.host_id,
          static_cast<unsigned int>(zbx_api::item::type::zbx_trapper),
@@ -265,7 +265,7 @@ void deploy_zabbix_cfm(hostdata &host)
                   "hostid": "%lu",
                   "type": %u,
                   "value_type": %u,
-                  "history": %lu,
+                  "history": %d,
                   "interfaceid": "%lu",
                   "applications": [ "%lu" ] }
             )**", host.item_name.c_str(), host.host_id,

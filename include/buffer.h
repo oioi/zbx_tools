@@ -5,6 +5,8 @@
 #include <cstdarg>
 #include <memory>
 
+#include <unistd.h>
+
 class buffer
 {
    public:

@@ -1,18 +1,18 @@
 #include "basic_mysql.h"
 #include "aux_log.h"
 
-basic_mysql::basic_mysql(const char *host, const char *username, const char *password, int port) : result(nullptr), rows_count(0)
+basic_mysql::~basic_mysql()
+{
+   if (nullptr != result) mysql_free_result(result);
+   mysql_close(&mysql);
+}
+
+void basic_mysql::init(const char *host, const char *username, const char *password, int port)
 {
    mysql_init(&mysql);
    if (nullptr == (conn = mysql_real_connect(&mysql, host, username, password, nullptr, port, nullptr, 0)))
       throw logging::error("basic_mysql", "Cannot connect to DB '%s' : %s", host, mysql_error(&mysql));
    mysql_set_character_set(&mysql, "utf8");
-}
-
-basic_mysql::~basic_mysql()
-{
-   if (nullptr != result) mysql_free_result(result);
-   mysql_close(&mysql);
 }
 
 unsigned int basic_mysql::query(bool store, const char *format, ...)
