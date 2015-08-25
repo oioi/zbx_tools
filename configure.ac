@@ -23,4 +23,5 @@ AC_OUTPUT([
         src/llid/Makefile
         src/zbx_mail/Makefile
 	src/zbx_cfm/Makefile
+        src/zbx_dd/Makefile
         ])
