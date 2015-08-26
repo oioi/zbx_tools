@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-void zbx_create_host(const plain_hostdata &hostdata, zabbix_hostdata zbx_hostdata);
+void zbx_create_host(glob_hostdata &hostdata);
 
 #endif
 

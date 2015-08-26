@@ -13,12 +13,17 @@
 
 enum { 
    flags_bitwidth = 8,  
-   max_objid_strlen = 128  // Should be enough, huh?
+   max_objid_strlen = 128,  // Should be enough, huh?
 };
 
 using flags_type = std::bitset<flags_bitwidth>;
 
-enum class device_flags {
+enum int_levels {
+   interfaces_monitoring_off = 0,
+   interfaces_monitoring_on = 1
+};
+
+enum device_flags {
    dis_ping_depend_update = 0,
    dis_name_update,
    dis_ping_level_update,
@@ -35,22 +40,21 @@ struct zabbix_hostdata
    std::set<uint_t> templates;
    std::set<uint_t> groups;
 
-   zabbix_hostdata() : id(0), flags(0), pingt_id(0) { }
+   zabbix_hostdata() : id(0), pingt_id(0) { }
 };
 
-// Device parameters are filled from DB by device objID. 
 struct device_params
 {
-   bool init;
-   std::string name;
-   std::string prefix;
+   bool init;                   // Is structure filled for a specific device
+   std::string devname;         // Device type name
+   std::string prefix;          // Device-specefic prefix. Added to visible host name in zabbix
    uint_t ping_level;
    uint_t int_level;
 
    device_params() : init(false), ping_level(1), int_level(0) { }
 };
 
-struct plain_hostdata
+struct glob_hostdata
 {
    std::string host;
    std::string name;
@@ -58,14 +62,14 @@ struct plain_hostdata
    buffer objid;
    std::string community;
 
-   device_params params;
+   device_params db_devdata;    // Fetched from DB by device objID
+   device_params zbx_devdata;   // Current state in zabbix, stored as macro
+   zabbix_hostdata zbx_host;    // zabbix specific device data
 
-   plain_hostdata(const char *host_) : host(host_), name(host_) { }
+   glob_hostdata(const char *host_) : host(host_), name(host_) { }
 };
 
-extern buffer tempbuf;
 extern zbx_api::api_session zbx_sess;
 extern std::vector<uint_t> ping_templates;
-
 
 #endif

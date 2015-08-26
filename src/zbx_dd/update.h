@@ -3,6 +3,6 @@
 
 #include "main.h"
 
-void zbx_update_host(const plain_hostdata &hostdata, zabbix_hostdata &zbx_hostdata);
+void zbx_update_host(glob_hostdata &host);
 
 #endif

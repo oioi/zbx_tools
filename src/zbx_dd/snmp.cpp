@@ -7,7 +7,7 @@
 #include "prog_config.h"
 #include "main.h"
 
-int snmp_get_objid(plain_hostdata &hostdata, long snmp_version)
+int snmp_get_objid(glob_hostdata &hostdata, long snmp_version)
 {
    static const char *funcname = "snmp_get_objid";
    static const oid objID[] = { 1, 3, 6, 1, 2, 1, 1, 2, 0 };

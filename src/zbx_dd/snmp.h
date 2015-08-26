@@ -3,6 +3,6 @@
 
 #include "main.h"
 
-int snmp_get_objid(plain_hostdata &hostdata, long snmp_version);
+int snmp_get_objid(glob_hostdata &hostdata, long snmp_version);
 
 #endif

@@ -53,7 +53,6 @@ conf::config_map config = {
    { "snmp_communities", { conf::val_type::multistring } }
 };
 
-buffer tempbuf;
 zbx_api::api_session zbx_sess;
 std::vector<uint_t> ping_templates;
 
@@ -62,15 +61,15 @@ bool primary_ip(const std::string &host, basic_mysql &db)
    static const char *funcname = "primary_ip";
    const char *hoststring = host.c_str();
 
-   uint_t count = db.query(true, "select is_primary from %s where ip = '%s'", 
+   uint_t count = db.query(true, "select is_primary from %s where ip = '%s'",
          config["dds-tech-db"]["devinfo-table"].get<conf::string_t>().c_str(), hoststring);
 
-   if (0 == count) logger.error_exit(funcname, "%s: No info in dds-tech DB - ignored.", hoststring);
-   if (1 != count) logger.error_exit(funcname, "%s: Somehow received more than one device from dds-tech DB: %lu", hoststring, count);
+   if (0 == count) logger.error_exit(funcname, "%s: no info from dds-tech DB -> ignored.", hoststring);
+   if (1 != count) logger.error_exit(funcname, "%s: somehow received more than ine device from dds-tech DB: %lu", hoststring, count);
    return strtoul(db.get(0, 0), nullptr, 10);
 }
 
-int get_zabbix_host(const std::string &host, zabbix_hostdata &zbx_hostdata)
+int get_zabbix_host(glob_hostdata &hostdata)
 {
    static const char *funcname = "get_zabbix_host";
 
@@ -82,79 +81,88 @@ int get_zabbix_host(const std::string &host, zabbix_hostdata &zbx_hostdata)
          "selectGroups" : [ "groupid" ],
          "selectParentTemplates": [ "templateid" ],
          "filter": { "host": ["%s"] } }
-   )**", host.c_str())) return 0;
+   )**", hostdata.host.c_str())) return 0;
 
-   if (false == zbx_sess.json_get_uint("result[0].hostid", &(zbx_hostdata.id)))
+   if (false == zbx_sess.json_get_uint("result[0].hostid", &(hostdata.zbx_host.id)))
       logger.error_exit(funcname, "Cannot get host ID from JSON response.");
 
-   buffer tempstr;
+   buffer tempstr, jsonpath;
    for (int i = 0; ;i++)
    {
-      tempbuf.print("result[0].macros[%d].macro", i);
-      if (false == zbx_sess.json_get_str(tempbuf.data(), &tempstr)) break;
-      std::string &lstr = zbx_hostdata.macros[tempstr.data()];
+      jsonpath.print("result[0].macros[%d].macro", i);
+      if (false == zbx_sess.json_get_str(jsonpath.data(), &tempstr)) break;
+      std::string &lstr = hostdata.zbx_host.macros[tempstr.data()];
 
-      tempbuf.print("result[0].macros[%d].value", i);
-      if (false == zbx_sess.json_get_str(tempbuf.data(), &tempstr))
+      jsonpath.print("result[0].macros[%d].value", i);
+      if (false == zbx_sess.json_get_str(jsonpath.data(), &tempstr))
          logger.error_exit(funcname, "Failed to get macro value.");
       lstr = tempstr.data();
    }
 
    // If we found a host and it doesn't have auto-deployer macro, then we have no right to do anything with it.
    // Return all ones in host flags, which means do nothing and exit.
-   auto flags_macro = zbx_hostdata.macros.find(config["zabbix"]["autod-macro"].get<conf::string_t>());
-   if (zbx_hostdata.macros.end() == flags_macro) { zbx_hostdata.flags.set(); return 1; }
-   zbx_hostdata.flags = flags_type(flags_macro->second);
+   auto flags_macro = hostdata.zbx_host.macros.find(config["zabbix"]["autod-macro"].get<conf::string_t>());
+   if (hostdata.zbx_host.macros.end() == flags_macro) { hostdata.zbx_host.flags.set(); return 1; }
+   hostdata.zbx_host.flags = flags_type(flags_macro->second);
 
    uint_t temp;
    for (int i = 0; ;i++)
    {
-      tempbuf.print("result[0].parentTemplates[%d].templateid", i);
-      if (false == zbx_sess.json_get_uint(tempbuf.data(), &temp)) break;
-      zbx_hostdata.templates.insert(temp);
+      jsonpath.print("result[0].parentTemplates[%d].templateid", i);
+      if (false == zbx_sess.json_get_uint(jsonpath.data(), &temp)) break;
+      hostdata.zbx_host.templates.insert(temp);
 
       for (auto id : ping_templates) {
-         if (id == temp) zbx_hostdata.pingt_id = temp; }
+         if (id == temp) hostdata.zbx_host.id = temp; }
    }
 
    for (int i = 0; ;i++)
    {
-      tempbuf.print("result[0].groups[%d].groupid", i);
-      if (false == zbx_sess.json_get_uint(tempbuf.data(), &temp)) break;
-      zbx_hostdata.groups.insert(temp);
+      jsonpath.print("result[0].groups[%d].groupid", i);
+      if (false == zbx_sess.json_get_uint(jsonpath.data(), &temp)) break;
+      hostdata.zbx_host.groups.insert(temp);
    }
    return 1;
 }
 
-void get_device_params(plain_hostdata &hostdata, basic_mysql &db)
+void get_device_params(glob_hostdata &hostdata, basic_mysql &db)
 {
    static const char *funcname = "get_device_params";
 
    if (0 == db.query(true, "select name, prefix, ping_level, int_level from %s where objID = '%s'",
             config["dds-tech-db"]["types-table"].get<conf::string_t>().c_str(), hostdata.objid.data()))
    {
-      logger.log_message(LOG_CRIT,  funcname, "%s: There is no records for objID '%s' in DB.", hostdata.host.c_str(), hostdata.objid.data());
+      logger.log_message(LOG_CRIT, funcname, "%s: There is no records for objID '%s' in DB.",
+            hostdata.host.c_str(), hostdata.objid.data());
       return;
    }
 
-   hostdata.params.init = true;
-   hostdata.params.name = db.get(0, 0);
-   hostdata.params.ping_level = strtoul(db.get(0, 2), nullptr, 10);
-   hostdata.params.int_level = strtoul(db.get(0, 3), nullptr, 10);
+   hostdata.db_devdata.init = true;
+   hostdata.db_devdata.devname = db.get(0, 0);
+   hostdata.db_devdata.ping_level = strtoul(db.get(0, 2), nullptr, 10);
+   hostdata.db_devdata.int_level = strtoul(db.get(0, 3), nullptr, 10);
 
-   if (0 == hostdata.params.ping_level or 3 < hostdata.params.ping_level)
-      logger.error_exit(funcname, "Got unexpected ping level from DB for '%s' : %lu", hostdata.objid.data(), hostdata.params.ping_level);
-   if (0 != hostdata.params.int_level and 1 != hostdata.params.int_level)
-      logger.error_exit(funcname, "Got unexpected int level from DB for '%s' : %lu", hostdata.objid.data(), hostdata.params.int_level);
+   if (0 == hostdata.db_devdata.ping_level or 3 < hostdata.db_devdata.ping_level)
+   {
+      logger.error_exit(funcname, "Received unexepected ping level from DB for '%s': %lu", 
+            hostdata.objid.data(), hostdata.db_devdata.ping_level);
+   }
+
+   if (interfaces_monitoring_off != hostdata.db_devdata.int_level and 
+       interfaces_monitoring_on != hostdata.db_devdata.int_level)
+   {
+      logger.error_exit(funcname, "Received unexpected int level from DB for '%s': %lu",
+            hostdata.objid.data(), hostdata.db_devdata.int_level);
+   }
 
    if (nullptr != db.get(0, 1))
    {
-      hostdata.params.prefix = db.get(0, 1);
-      hostdata.params.prefix += ' ';
+      hostdata.db_devdata.prefix = db.get(0, 1);
+      hostdata.db_devdata.prefix += ' ';
    }
 }
 
-void get_device_name(plain_hostdata &hostdata, basic_mysql &db)
+void get_device_name(glob_hostdata &hostdata, basic_mysql &db)
 {
    static const char *funcname = "get_device_name";
 
@@ -191,7 +199,7 @@ int main(int argc, char *argv[])
                      config["dds-tech-db"]["password"].get<conf::string_t>(),
                      config["dds-tech-db"]["port"].get<conf::integer_t>());
 
-      plain_hostdata hostdata(argv[1]);
+      glob_hostdata hostdata(argv[1]);
       if (!primary_ip(hostdata.host, db)) return 0;
 
       zbx_sess.set_auth(config["zabbix"]["api-url"].get<conf::string_t>(),
@@ -203,20 +211,17 @@ int main(int argc, char *argv[])
       ping_templates.push_back(config["zabbix"]["icmp_l2_templateid"].get<conf::integer_t>());
       ping_templates.push_back(config["zabbix"]["icmp_l3_templateid"].get<conf::integer_t>());
 
-      zabbix_hostdata zbx_hostdata;
-      if (0 != get_zabbix_host(hostdata.name, zbx_hostdata) and zbx_hostdata.flags.all()) return 0;
+      if (0 != get_zabbix_host(hostdata) and hostdata.zbx_host.flags.all()) return 0;
 
       init_snmp(progname);
       netsnmp_ds_set_int(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OID_OUTPUT_FORMAT, NETSNMP_OID_OUTPUT_NUMERIC);
 
       if (0 != snmp_get_objid(hostdata, SNMP_VERSION_2c) or
           0 != snmp_get_objid(hostdata, SNMP_VERSION_1)) get_device_params(hostdata, db);
-      if (hostdata.params.init) get_device_name(hostdata, db);
+      if (hostdata.db_devdata.init) get_device_name(hostdata, db);
 
-      if (0 == zbx_hostdata.id) zbx_create_host(hostdata, zbx_hostdata);
-      else                      zbx_update_host(hostdata, zbx_hostdata);
-
-
+      if (0 == hostdata.zbx_host.id) zbx_create_host(hostdata);
+      else                           zbx_update_host(hostdata);
 
    }
 
