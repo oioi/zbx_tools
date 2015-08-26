@@ -30,6 +30,11 @@ enum device_flags {
    dis_int_level_update
 };
 
+enum data_diff {
+   
+
+};
+
 struct zabbix_hostdata
 {
    uint_t id;

@@ -86,10 +86,11 @@ void buffer::mappend(const char *mem, size_type length)
 
 void buffer::append(char ch)
 {
-   size_type sz = sizeof(char);
+   size_type sz = sizeof(char) * 2;
    if ((capacity_ - size_) < sz) grow();
    *(data_.get() + size_) = ch;
    size_++;
+   *(data_.get() + size_) = '\0';
 }
 
 void buffer::setmem(char *memory, size_type capacity, size_type size)

@@ -9,8 +9,14 @@
 buffer build_host_macrostr(const glob_hostdata &hostdata)
 {
    buffer macros;
+   const conf::string_t &param = config["zabbix"]["param-macro"].get<conf::string_t>();
+
    for (auto &macro : hostdata.zbx_host.macros)
-      macros.append(R"**({"macro": "%s", "value": "%s"},)**", macro.first.c_str(), macro.second.c_str());
+   {
+      if (macro.first == param) macros.append(R"**({"macro": "%s", "value": "%lu;%lu;%s"},)**",
+            param.c_str(), hostdata.db_devdata.ping_level, hostdata.db_devdata.int_level, hostdata.db_devdata.devname.c_str());
+      else macros.append(R"**({"macro": "%s", "value": "%s"},)**", macro.first.c_str(), macro.second.c_str());
+   }
    macros.pop_back();
    return macros;
 }
@@ -167,7 +173,7 @@ void zbx_update_host(glob_hostdata &hostdata)
        hostdata.zbx_devdata.int_level != hostdata.db_devdata.int_level)
    {
       uint_t template_id = config["zabbix"]["int-templateid"].get<conf::integer_t>();
-      switch (hostdata.zbx_devdata.ping_level)
+      switch (hostdata.zbx_devdata.int_level)
       {
          case 0: hostdata.zbx_host.templates.insert(template_id); break;
          case 1: hostdata.zbx_host.templates.erase(template_id);
@@ -187,7 +193,6 @@ void zbx_update_host(glob_hostdata &hostdata)
       changes++;
    }
 
-   /*
    if (0 == changes)
    {
       json.append('}');
@@ -195,13 +200,24 @@ void zbx_update_host(glob_hostdata &hostdata)
       return;
    }
 
-   if (0 != templates_clear.size()) 
+   if (0 != clear_templates.size()) 
    {
-      templates_clear.pop_back();
-      json.append(R"**(,"templates_clear": [ %s ])**", templates_clear.data());
+      clear_templates.pop_back();
+      json.append(R"**(,"templates_clear": [ %s ])**", clear_templates.data());
    }
+   json.append(R"**(,"macros": [ %s ])**", build_host_macrostr(hostdata).data());
 
-   json.append(R"**(,"macros": [ %s ])**", build_host_macrostr(hostdata).data()); */
 
+   json.append(R"**(, "templates": [)**");
+   for (auto id : hostdata.zbx_host.templates) json.append(R"**({"templateid": "%lu"},)**", id);
+   json.pop_back();
+   json.append(']');
+
+   json.append(R"**(, "groups": [)**");
+   for (auto id : hostdata.zbx_host.groups) json.append(R"**({"groupid": "%lu"},)**", id);
+   json.pop_back();
+   json.append("]}");
+
+   fprintf(stderr, "%s\n\n", json.data());
 
 }

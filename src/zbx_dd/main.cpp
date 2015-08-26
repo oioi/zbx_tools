@@ -113,7 +113,7 @@ int get_zabbix_host(glob_hostdata &hostdata)
       hostdata.zbx_host.templates.insert(temp);
 
       for (auto id : ping_templates) {
-         if (id == temp) hostdata.zbx_host.id = temp; }
+         if (id == temp) hostdata.zbx_host.pingt_id = temp; }
    }
 
    for (int i = 0; ;i++)
