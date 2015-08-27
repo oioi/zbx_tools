@@ -179,6 +179,24 @@ void get_device_name(glob_hostdata &hostdata, basic_mysql &db)
    hostdata.name += ")";
 }
 
+int get_device_uplink(glob_hostdata &hostdata, basic_mysql &db)
+{
+   static const char *funcname = "get_device_uplink";
+   switch (db.query(true, "select ip from %s where remote_ip = '%s'",
+            config["zabbix"]["hierarchy-table"].get<conf::string_t>()))
+   {
+      case 0: logger.log_message(LOG_WARNING, funcname, "%s: cannot obtain uplink device for host", hostdata.host.c_str());
+              return 0;
+      default: logger.log_message(LOG_WARNING, funcname, "%s: received more than one uplink for host.", hostdata.host.c_str());
+               return 0;
+
+      case 1: break;
+   }
+
+   hostdata.uplink = db.get(0, 0);
+   return 1;
+}
+
 int main(int argc, char *argv[])
 {
    logger.method = logging::log_method::M_STDE;
@@ -223,9 +241,16 @@ int main(int argc, char *argv[])
       if (0 == hostdata.zbx_host.id) zbx_create_host(hostdata);
       else                           zbx_update_host(hostdata);
 
+      if (! hostdata.zbx_host.flags.test(dig_ping_depend_update))
+      {
+         if (0 != get_device_uplink(hostdata, db))
+            update_icmp_trigdepend(hostdata);
+      }
+
+
    }
 
-   catch (logging::error &error) { logger.error_exit(progname, "Exception thrown while processing host: %s", error.what()); }
-   catch (...) { logger.error_exit(progname, "Aborted by generic exception throw."); }
+   catch (logging::error &error) { logger.error_exit(progname, "%s: Exception thrown while processing host: %s", argv[1], error.what()); }
+   catch (...) { logger.error_exit(progname, "%s: Aborted by generic exception throw.", argv[1]); }
 
 }

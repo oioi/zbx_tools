@@ -193,6 +193,8 @@ void zbx_update_host(glob_hostdata &hostdata)
       changes++;
    }
 
+   // Everithing below is looking really ugly.
+   // I'll try to figure out a better way when there will be some free time.
    if (0 == changes)
    {
       json.append('}');
@@ -211,13 +213,11 @@ void zbx_update_host(glob_hostdata &hostdata)
    json.append(R"**(, "templates": [)**");
    for (auto id : hostdata.zbx_host.templates) json.append(R"**({"templateid": "%lu"},)**", id);
    json.pop_back();
-   json.append(']');
 
-   json.append(R"**(, "groups": [)**");
+   json.append(R"**(], "groups": [)**");
    for (auto id : hostdata.zbx_host.groups) json.append(R"**({"groupid": "%lu"},)**", id);
    json.pop_back();
+
    json.append("]}");
-
-   fprintf(stderr, "%s\n\n", json.data());
-
+   zbx_sess.send_vstr(json.data());
 }

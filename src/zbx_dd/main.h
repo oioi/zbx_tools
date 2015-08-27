@@ -30,11 +30,6 @@ enum device_flags {
    dis_int_level_update
 };
 
-enum data_diff {
-   
-
-};
-
 struct zabbix_hostdata
 {
    uint_t id;
@@ -66,6 +61,7 @@ struct glob_hostdata
 
    buffer objid;
    std::string community;
+   std::string uplink;
 
    device_params db_devdata;    // Fetched from DB by device objID
    device_params zbx_devdata;   // Current state in zabbix, stored as macro
