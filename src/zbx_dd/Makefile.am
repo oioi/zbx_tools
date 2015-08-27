@@ -1,5 +1,5 @@
 bin_PROGRAMS = zbx_dd
-zbx_dd_SOURCES = snmp.h snmp.cpp create.h create.cpp update.h update.cpp main.h main.cpp
+zbx_dd_SOURCES = snmp.h snmp.cpp create.h create.cpp update.h update.cpp trigdepend.h trigdepend.cpp main.h main.cpp
 zbx_dd_LDADD = $(top_srcdir)/src/libs/buffer/libbuffer.a \
 		 $(top_srcdir)/src/libs/config/libconfig.a \
 		 $(top_srcdir)/src/libs/logging/liblogging.a \
