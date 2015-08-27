@@ -96,7 +96,7 @@ void update_icmp_trigdepend(glob_hostdata &hostdata)
    uint_t host_temp_trigid, uplink_temp_trigid;
    uplink_temp_trigid = get_template_unavail_trigid(zbx_uplink.pingt_id);
 
-   // We alredy know both host and uplink ping templates, because we either create host or selected
+   // We already know both host and uplink ping templates, because we either created host or selected
    // his info from Zabbix. If both host and uplink have the same ping template, we don't need to
    // check it for other host.
    if (hostdata.zbx_host.pingt_id == zbx_uplink.pingt_id) host_temp_trigid = uplink_temp_trigid;
