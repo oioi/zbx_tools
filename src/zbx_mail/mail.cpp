@@ -68,6 +68,15 @@ void mail_message::add_image(const char *name, const char *data, size_t size)
    imgs.push_back(std::move(eimage));
 }
 
+void mail_message::make_digest(const char *data)
+{
+   unsigned char digest[MD5_DIGEST_LENGTH];
+
+   MD5(reinterpret_cast<const unsigned char *>(data), strlen(data), digest);
+   for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
+      sprintf(digest_string + i*2, "%02x", digest[i]);   
+}
+
 void cache_cleanup()
 {
    static const char *funcname = "cache_cleanup";
@@ -145,12 +154,8 @@ void mail_message::open_cache(const std::string &filename, const char *mode)
 cache_status mail_message::try_cache(const char *body)
 {
    static const char *funcname = "mail_message::try_cache";
-   unsigned char digest[MD5_DIGEST_LENGTH];
 
-   MD5(reinterpret_cast<const unsigned char *>(body), strlen(body), digest);
-   for (int i = 0; i < MD5_DIGEST_LENGTH; i++)
-      sprintf(digest_string + i*2, "%02x", digest[i]);
-
+   make_digest(body);
    cache_filename = config["cache-dir"].get<conf::string_t>() + '/';
    cache_filename.append(digest_string, MD5_DIGEST_LENGTH * 2);
    cache_filename += ".msg";
@@ -309,6 +314,7 @@ void mail_message::send(const char *body)
    if (nullptr == body) fill_message(message);
    else
    {
+      make_digest(body);
       std::string fullfrom = config["smtp-from-name"].get<conf::string_t>() + config["smtp-from"].get<conf::string_t>();
       message.print("From: %s\r\n"
                     "Subject: %s\r\n"

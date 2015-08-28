@@ -53,33 +53,10 @@ cfg_opt_t * build_section(section_t *section, section_ptrs &ptrs)
 
       switch (entry.second.what_type())
       {
-         case val_type::string:
-         {
-            cfg_opt_t temp = CFG_STR(name, 0, CFGF_NODEFAULT);
-            *ptr = temp;
-            break;
-         }
-
-         case val_type::multistring:
-         {
-            cfg_opt_t temp = CFG_STR_LIST(name, 0, CFGF_NODEFAULT);
-            *ptr = temp;
-            break;
-         }
-
-         case val_type::integer:
-         {
-            cfg_opt_t temp = CFG_INT(name, 0, CFGF_NODEFAULT);
-            *ptr = temp;
-            break;
-         }
-
-         case val_type::section:
-         {
-            cfg_opt_t temp = CFG_SEC(name, build_section(entry.second.get<conf::section_t *>(), ptrs), CFGF_NONE);
-            *ptr = temp;
-            break;
-         }
+         case val_type::integer:     *ptr = CFG_INT(name, 0, CFGF_NODEFAULT); break;
+         case val_type::string:      *ptr = CFG_STR(name, 0, CFGF_NODEFAULT); break;
+         case val_type::multistring: *ptr = CFG_STR_LIST(name, 0, CFGF_NODEFAULT); break;
+         case val_type::section:     *ptr = CFG_SEC(name, build_section(entry.second.get<conf::section_t *>(), ptrs), CFGF_NONE); break;
 
          case val_type::unknown:
             throw logging::error(funcname, "Val with unknown type in section: %s", name);
@@ -87,8 +64,7 @@ cfg_opt_t * build_section(section_t *section, section_ptrs &ptrs)
       ptr++;
    }
 
-   cfg_opt_t temp = CFG_END();
-   *ptr = temp;
+   *ptr = CFG_END();
    return ptrs.back().get();
 }
 
