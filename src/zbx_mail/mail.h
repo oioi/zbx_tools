@@ -61,6 +61,7 @@ class mail_message
       void add_post(const char *format, ...) __attribute__((format(printf,2,3)));      
       void add_image(const char *name, const char *data, size_t size);
 
+      void make_digest(const char *data);
       cache_status try_cache(const char *body);
       void generate_message();
       void send(const char *body = nullptr);

@@ -38,9 +38,9 @@ namespace {
 }
 
 conf::section_t config = {
-   { "smtp-host",      { conf::val_type::string, "smtp://192.168.133.100" } },
-   { "smtp-from",      { conf::val_type::string } },
-   { "smtp-from-name", { conf::val_type::string } },
+   { "smtp-host",      { conf::val_type::string, "smtp://192.168.133.100"   } },
+   { "smtp-from",      { conf::val_type::string, "<noreply@somezabbix.org>" } },
+   { "smtp-from-name", { conf::val_type::string, "Zabbix " } },
 
    { "cache-dir",      { conf::val_type::string } },
    { "cache-timeout",  { conf::val_type::integer, 10 } },
