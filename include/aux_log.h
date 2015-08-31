@@ -22,7 +22,7 @@ struct error : public std::exception
    buffer message;
 
    char const *what() const noexcept { return message.data(); }
-   error(const char *funcname, const char *format, ...)
+   error(const char *funcname, const char *format, ...) noexcept
       __attribute__((format(printf,3,4)));
    ~error() noexcept { }
 };

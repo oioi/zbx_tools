@@ -12,14 +12,18 @@ class buffer
    public:
       typedef ssize_t size_type;
       enum {
-         default_mul = 4, 
+         default_mul = 2,
          default_size = 1024 
       };
 
-      buffer(buffer &&other);
-      buffer(const buffer &other);
       explicit buffer(size_type st_capacity = 0) : data_(nullptr), size_(0), capacity_(st_capacity) {
-         if (0 != capacity_) grow(); }
+         if (0 != capacity_) grow(st_capacity); }      
+
+      buffer(buffer &&other) { move(std::move(other)); }
+      buffer(const buffer &other) { copy(other); }
+
+      buffer& operator=(buffer &&other) { move(std::move(other)); return *this; }
+      buffer& operator=(const buffer &other) { copy(other); return *this; }
 
       const char *data() const { return data_.get(); }
       char *mem() { return data_.get(); }
@@ -46,6 +50,8 @@ class buffer
       size_type size_;
       size_type capacity_;
 
+      void move(buffer &&other);      
+      void copy(const buffer &other);
       void print_(const char *format, va_list args);      
       void grow(size_type min_capacity = default_size, size_type mul = default_mul);
 };
