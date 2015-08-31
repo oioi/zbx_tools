@@ -45,7 +45,7 @@ std::pair<uint_t, uint_t> get_host_unavail_trigid(uint_t host_id, uint_t templat
          "hostids": [ "%lu" ],
          "filter": { "templateid": "%lu" },
          "selectDependencies": "" }
-   )**", host_id, template_id)) logger.error_exit(funcname, "Received no trigger for"
+   )**", host_id, template_id)) logger.error_exit(funcname, "Received no trigger for "
       "host %lu ICMP unavailability with template ID %lu", host_id, template_id);
 
    std::pair<uint_t, uint_t> trigger(0, 0);

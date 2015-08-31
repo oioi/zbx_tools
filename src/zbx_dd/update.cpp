@@ -163,7 +163,8 @@ void zbx_update_host(glob_hostdata &hostdata)
    if (! hostdata.zbx_host.flags.test(dis_ping_level_update) and 
        hostdata.zbx_devdata.ping_level != hostdata.db_devdata.ping_level)
    {
-      hostdata.zbx_host.templates.insert(ping_templates[hostdata.db_devdata.ping_level]);
+      hostdata.zbx_host.pingt_id = ping_templates[hostdata.db_devdata.ping_level];
+      hostdata.zbx_host.templates.insert(hostdata.zbx_host.pingt_id);
       hostdata.zbx_host.templates.erase(ping_templates[hostdata.zbx_devdata.ping_level]);
       clear_templates.append(R"**({"templateid": "%lu"},)**", ping_templates[hostdata.zbx_devdata.ping_level]);
       changes++;

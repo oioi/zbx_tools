@@ -46,13 +46,13 @@ int snmp_get_objid(glob_hostdata &hostdata, long snmp_version)
           SNMP_ERR_NOERROR == response->errstat)
       {
          netsnmp_variable_list *vars = response->variables;
-         if (ASN_OBJECT_ID != vars->type) logger.error_exit(funcname, "%s: Device returned an unexpected ASN type for ObjID OID.", hoststr);
          if (SNMP_NOSUCHOBJECT == vars->type) 
          {
             logger.log_message(LOG_INFO, funcname, 
                   "%s: host returned 'no such object' for objID OID. Assuming, that it is a dumb piece of can.", hoststr);
             return 0;
-         }
+         }         
+         if (ASN_OBJECT_ID != vars->type) logger.error_exit(funcname, "%s: Device returned an unexpected ASN type for ObjID OID.", hoststr);
 
          char *objid_str = new char[max_objid_strlen];
          int len;

@@ -176,7 +176,9 @@ void get_device_name(glob_hostdata &hostdata, basic_mysql &db)
 
    hostdata.name = db.get(0, 0);
    hostdata.name += " (";
-   hostdata.name += hostdata.host.c_str() + 7;
+
+   // 7 - 172.17. offset. Used only here.
+   hostdata.name += hostdata.host.c_str() + 7; 
    hostdata.name += ")";
 }
 
