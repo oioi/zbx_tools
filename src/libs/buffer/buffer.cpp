@@ -6,19 +6,20 @@
 
 #include "buffer.h"
 
-buffer::buffer(buffer &&other)
+void buffer::move(buffer &&other)
 {
    size_ = other.size_;
    capacity_ = other.capacity_;
    data_ = std::move(other.data_);
+   other.size_ = other.capacity_ = 0;
 }
 
-buffer::buffer(const buffer &other)
+void buffer::copy(const buffer &other)
 {
    size_ = other.size_;
    capacity_ = other.capacity_;
    data_.reset(new char[capacity_]);
-   memcpy(data_.get(), other.data_.get(), size_);
+   memcpy(data_.get(), other.data_.get(), size_);   
 }
 
 void buffer::grow(size_type min, size_type mul)

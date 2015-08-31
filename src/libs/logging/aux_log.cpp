@@ -23,7 +23,7 @@ void default_errstr(buffer &message, int priority, const char *funcname, const c
    message.vappend(format, args);
 }
 
-error::error(const char *funcname, const char *format, ...)
+error::error(const char *funcname, const char *format, ...) noexcept
 {
    va_list args;
    va_start(args, format);
