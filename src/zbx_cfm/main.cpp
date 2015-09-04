@@ -181,8 +181,9 @@ void check_cfm_application(hostdata &host)
 
 void snmp_trap_prepare(hostdata &host, basic_mysql &db)
 {
-   static const std::string vlan_str = "%VLAN%";
-   static const std::string host_str = "%HOST%";
+   static const std::string vlan_str {"%VLAN%"};
+   static const std::string host_str {"%HOST%"};
+   static const std::string trap_str {"%TRAP%"};
 
    db.query(true, "select trap_item, trigger_regex from %s where objID = '%s'",
          config["mysql"]["cfm-table"].get<conf::string_t>().c_str(), host.objid.data());
@@ -197,9 +198,16 @@ void snmp_trap_prepare(hostdata &host, basic_mysql &db)
    while (std::string::npos != (pos = host.trigger_expr.find(host_str)))
       host.trigger_expr.replace(pos, host_str.size(), host.hostname);
 
+   while (std::string::npos != (pos = host.trigger_expr.find(trap_str)))
+      host.trigger_expr.replace(pos, trap_str.size(), host.item_name);
+
    pos = std::string::npos;
    while (std::string::npos != (pos = host.trigger_expr.find('"', (std::string::npos == pos) ? 0 : pos + 2)))
-      host.trigger_expr.replace(pos, 1, "\\\"");
+      host.trigger_expr.replace(pos, sizeof(char), "\\\"");
+
+   pos = std::string::npos;
+   while (std::string::npos != (pos = host.trigger_expr.find('\n', (std::string::npos == pos) ? 0 : pos + 2)))
+      host.trigger_expr.replace(pos, sizeof(char), "\\n");
 
    zbx_sess.send_vstr(R"**(
       "method": "item.get",
@@ -316,7 +324,7 @@ void delete_zabbix_cfm(hostdata &host)
 {
    static const char *funcname = "delete_zabbix_cfm";
 
-   uint_t item_id, trigger_id;
+   uint_t item_id {}, trigger_id {};
    std::istringstream in(host.macros[cfm_macro]);
    std::string token;
 
@@ -413,7 +421,7 @@ void create_hosts_cfm(std::vector<hostdata> &hosts, basic_mysql &db)
       get_zbx_hostdata(host, true);
 
       if (host.macros.end() != host.macros.find(cfm_macro))
-         logger.error_exit(funcname, "%s: vlan %s macro already exists. Either you trying to reinit host in a wrong way or there's a mistake.",
+         logger.error_exit(funcname, "%s: vlan %s macro already exists. Either you're trying to reinit host in a wrong way or there's a mistake.",
                            host.hostname.c_str(), vlan.c_str());
 
       if (0 == db.query(true, "select alert_type from %s where objID = '%s'", 
