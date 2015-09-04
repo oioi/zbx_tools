@@ -107,7 +107,7 @@ void update_host_devtype(glob_hostdata &hostdata, buffer &clear_templates)
    std::string to = hostdata.db_devdata.devname;
 
    if (0 == from.size()) from = config["zabbix"]["default-group"].get<conf::string_t>();
-   if (0 == to.size()) from = config["zabbix"]["default-group"].get<conf::string_t>();
+   if (0 == to.size()) to = config["zabbix"]["default-group"].get<conf::string_t>();
 
    if (0 != (temp_id = zbx_api::get_groupid_byname(from, zbx_sess))) hostdata.zbx_host.groups.erase(temp_id);
    if (0 != (temp_id = zbx_api::get_templateid_byname(from, zbx_sess)))
