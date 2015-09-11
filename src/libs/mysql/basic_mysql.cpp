@@ -7,7 +7,8 @@ basic_mysql::~basic_mysql()
    mysql_close(&mysql);
 }
 
-void basic_mysql::init(const char *host, const char *username, const char *password, int port)
+basic_mysql::basic_mysql(const char *host, const char *username, const char *password, int port) :
+         conn {}, result {}, rows_count {}
 {
    mysql_init(&mysql);
    if (nullptr == (conn = mysql_real_connect(&mysql, host, username, password, nullptr, port, nullptr, 0)))

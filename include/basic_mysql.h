@@ -10,10 +10,9 @@
 class basic_mysql
 {
    public:
-      basic_mysql(const char *host, const char *username, const char *password, int port) : 
-         result(nullptr), rows_count(0) { init(host, username, password, port); }
+      basic_mysql(const char *host, const char *username, const char *password, int port);
       basic_mysql(const std::string &host, const std::string &username, const std::string password, int port) :
-         result(nullptr), rows_count(0) { init(host.c_str(), username.c_str(), password.c_str(), port); }
+         basic_mysql(host.c_str(), username.c_str(), password.c_str(), port) { };
       ~basic_mysql();
 
       unsigned int query(bool store, const char *format, ...) __attribute__((format(printf,3,4)));
