@@ -102,4 +102,56 @@ bool api_session::json_get_str(const char *json_path, buffer *buf)
    return true;
 }
 
+
+uint_t get_groupid_byname(const std::string &name, api_session &zbx_sess)
+{
+   static const char *funcname = "zbx_api::get_groupid_byname";
+
+   if (0 == zbx_sess.send_vstr(R"**(
+      "method": "hostgroup.get",
+      "params": {
+         "output": "groupid",
+         "filter": { "name": [ "%s" ] } }
+   )**", name.c_str())) return 0;
+
+   uint_t temp;
+   if (false == zbx_sess.json_get_uint("result[0].groupid", &temp))
+      throw logging::error(funcname, "Cannot get group ID from JSON response");
+   return temp;
+}
+
+uint_t create_group(const std::string &name, api_session &zbx_sess)
+{
+   static const char *funcname = "zbx_api::create_group";
+
+   zbx_sess.send_vstr(R"**(
+      "method": "hostgroup.create",
+      "params": { "name": "%s" }
+   )**", name.c_str());
+
+   uint_t temp;
+   if (false == zbx_sess.json_get_uint("result.groupids[0]", &temp))
+      throw logging::error(funcname, "Cannot get created group ID from JSON response");
+   return temp;
+}
+
+uint_t get_templateid_byname(const std::string &name, api_session &zbx_sess)
+{
+   static const char *funcname = "zbx_api::get_templateid_byname";
+
+   if (0 == zbx_sess.send_vstr(R"**(
+      "method": "template.get",
+      "params": {
+         "output": "name",
+         "filter": { "host": [ "%s" ] } }
+   )**", name.c_str())) return 0;
+
+   uint_t temp;
+   if (false == zbx_sess.json_get_uint("result[0].templateid", &temp))
+      throw logging::error(funcname, "Cannot get template ID from JSON response");
+   return temp;
+}
+
+
+
 } // ZBX_API NAMESPACE
