@@ -25,7 +25,7 @@ void buffer::copy(const buffer &other)
 void buffer::grow(size_type min, size_type mul)
 {
    if (0 == capacity_) capacity_ = default_size;
-   while (capacity_ < min) capacity_ *= mul;
+   while (capacity_ <= min) capacity_ *= mul;
 
    char *n_data = new char[capacity_];
    memcpy(n_data, data_.get(), size_);
