@@ -1,0 +1,8 @@
+add_subdirectory(api)
+add_subdirectory(buffer)
+add_subdirectory(config)
+add_subdirectory(curl_cl)
+add_subdirectory(frozen)
+add_subdirectory(log)
+add_subdirectory(mysql)
+add_subdirectory(zbx_sender)

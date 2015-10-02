@@ -1,0 +1,5 @@
+add_subdirectory(libs)
+add_subdirectory(llid)
+add_subdirectory(zbx_cfm)
+add_subdirectory(zbx_dd)
+add_subdirectory(zbx_mail)
