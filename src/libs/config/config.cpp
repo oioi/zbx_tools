@@ -123,7 +123,7 @@ void read_cfg_section(section_t *section, cfg_t *cfg_sec, std::stringstream &err
    }
 }
 
-void cfg_error_fnc(cfg_t *cfg, const char *format, va_list ap)
+void cfg_error_fnc(cfg_t*, const char *format, va_list ap)
 {
    logger.log_vmessage(LOG_ERR, "cfg_parse", format, ap);
 }

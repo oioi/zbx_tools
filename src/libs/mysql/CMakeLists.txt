@@ -1,2 +1,2 @@
 set(SOURCES basic_mysql.cpp)
-add_library(libbasic_mysql.a ${SOURCES})
+add_library(basic_mysql ${SOURCES})

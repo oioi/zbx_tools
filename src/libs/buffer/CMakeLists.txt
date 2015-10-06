@@ -1,2 +1,2 @@
 set(SOURCES buffer.cpp)
-add_library(libbuffer.a ${SOURCES})
+add_library(buffer ${SOURCES})

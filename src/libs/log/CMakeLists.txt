@@ -1,2 +1,2 @@
 set(SOURCES aux_log.cpp)
-add_library(liblog.a ${SOURCES})
+add_library(log ${SOURCES})

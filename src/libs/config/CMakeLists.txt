@@ -1,2 +1,2 @@
 set(SOURCES config.cpp)
-add_library(libconfig.a ${SOURCES})
+add_library(config ${SOURCES})

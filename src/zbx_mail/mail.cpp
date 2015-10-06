@@ -250,7 +250,7 @@ void mail_message::generate_message()
                             "Content-Transfer-Encoding: BASE64\n\n", 
                             digest_string, image.name.c_str());
          BIO_write(b64, image.data.c_str(), image.data.size());
-         BIO_flush(b64);
+         (void) BIO_flush(b64);  // cast away warning. nasty macros.
       }
       BIO_free_all(b64);
    }

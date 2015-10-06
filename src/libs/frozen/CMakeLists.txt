@@ -1,2 +1,2 @@
 set(SOURCES frozen.c)
-add_library(libfrozen.a ${SOURCES})
+add_library(frozen ${SOURCES})
