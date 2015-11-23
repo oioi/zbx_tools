@@ -79,7 +79,7 @@ class api_session
       bool active;
       uint_t req_id;
 
-      std::unique_ptr<char> auth_token;
+      std::unique_ptr<char []> auth_token;
 
       std::string url;
       std::string username;

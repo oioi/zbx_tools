@@ -3,8 +3,10 @@
 
 #include <string>
 #include <vector>
+#include <sstream>
 #include <unistd.h>
 
+#include "frozen.h"
 #include "buffer.h"
 
 class tcp_stream
@@ -35,6 +37,9 @@ class tcp_client : private tcp_stream
 
 struct sender_data
 {
+   sender_data(const std::string &host_, const std::string &key_, const std::string &value_, time_t clock_) :
+      host{host_}, key{key_}, value{value_}, clock{clock_} { }
+
    std::string host;
    std::string key;
    std::string value;
@@ -44,7 +49,7 @@ struct sender_data
 class zbx_sender : private tcp_client
 {
    public:
-      zbx_sender(const char *peer, unsigned port) : 
+      zbx_sender(const char *peer = "127.0.0.1", unsigned port = 10051) :
          tcp_client{peer, port}, datalen{}, tokarr{new json_token[json_arrsize]} { }
 
       void clear() { data.clear(); }      
@@ -71,7 +76,7 @@ class zbx_sender : private tcp_client
 template <typename T>
 void zbx_sender::add_data(const std::string &host, const std::string &key, const T &val, time_t clock)
 {
-   std::istringstream ss;
+   std::ostringstream ss;
    ss << val;
    data.emplace_back(host, key, ss.str(), clock);
 }

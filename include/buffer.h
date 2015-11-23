@@ -46,7 +46,7 @@ class buffer
       void mappend(const char *mem, size_type size);      
 
    private:
-      std::unique_ptr<char> data_;
+      std::unique_ptr<char []> data_;
       size_type size_;
       size_type capacity_;
 

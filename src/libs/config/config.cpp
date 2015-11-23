@@ -10,7 +10,7 @@
 
 namespace conf {
 
-using section_ptrs = std::vector<std::unique_ptr<cfg_opt_t>>;
+using section_ptrs = std::vector<std::unique_ptr<cfg_opt_t []>>;
 const std::vector<std::vector<std::type_index>> allowed_types {
    { std::type_index(typeid(integer_t)) },
    { std::type_index(typeid(string_t)), std::type_index(typeid(char *)) },
@@ -45,7 +45,7 @@ cfg_opt_t * build_section(section_t *section, section_ptrs &ptrs)
    static const char *funcname = "conf::build_section";
 
    cfg_opt_t *ptr = new cfg_opt_t[section->size() + 1];
-   ptrs.push_back(std::unique_ptr<cfg_opt_t>(ptr));
+   ptrs.push_back(std::unique_ptr<cfg_opt_t []>(ptr));
 
    for (auto &entry : *section)
    {

@@ -1,14 +1,11 @@
 #include <stdexcept>
 #include <cstring>
-#include <sstream>
 
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <errno.h>
 
 #include "aux_log.h"
-#include "frozen.h"
-
 #include "zbx_sender.h"
 
 ssize_t tcp_stream::send(const void *buffer, size_t len, int flags)
