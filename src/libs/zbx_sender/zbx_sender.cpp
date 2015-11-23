@@ -1,6 +1,8 @@
 #include <stdexcept>
 #include <cstring>
 
+#include <boost/tokenizer.hpp>
+
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <errno.h>
@@ -97,7 +99,7 @@ void zbx_sender::build_data()
    else databuf.append("]}");
 }
 
-void zbx_sender::send(bool build)
+sender_response zbx_sender::send(bool build)
 {
    static const char *funcname {"zbx_sender::send"};
    static const char *successfull {"success"};
@@ -105,8 +107,9 @@ void zbx_sender::send(bool build)
 
    if (build) 
    {
-      if (0 == data.size()) return;
+      if (0 == data.size()) return {};
       build_data();
+      data.clear();
    }
 
    datalen = databuf.size();
@@ -114,28 +117,47 @@ void zbx_sender::send(bool build)
    tcp_client::send(&datalen, sizeof(datalen));
    tcp_client::send(databuf.data(), datalen);
 
-   size_t offset = data_offset;
-   // Buffer should be at least 1Kb already, which should be enough to store response.
-   size_t len = tcp_client::recv(databuf.mem(), databuf.capacity()); 
+   uint64_t len = 0;
+   tcp_client::set_recv_timeout({5, 0}); // 5 seconds should be enough for data to arrive, right?
+   while (len < data_offset) len += tcp_client::recv(databuf.mem() + len, databuf.capacity() - len);
 
-   if (sizeof(header) == len)
-   {
-      if (0 != memcmp(header, databuf.data(), sizeof(header)))
-         throw logging::error(funcname, "unexpected header in response");
-      offset -= sizeof(header);
-      len = tcp_client::recv(databuf.mem(), databuf.capacity());
-   }
+   // We have 13 bytes, which contain header and data length.
+   if (0 != memcmp(header, databuf.data(), sizeof(header)))
+      throw logging::error(funcname, "unexpected header in response");
 
-   else
-   {
-      if (len < data_offset) throw logging::error(funcname, "unexpected response length: %lu", len);
-      if (0 != memcmp(header, databuf.data(), sizeof(header)))
-         throw logging::error(funcname, "unexpected header in response");
-   }
+   // This is really silly. Expected data size from header + 13 bytes header size.
+   datalen = *(reinterpret_cast<const uint64_t *>(databuf.data() + sizeof(header))) + data_offset;
+   while (len < datalen) len += tcp_client::recv(databuf.mem() + len, databuf.capacity() - len);
 
    json_token *tok;   
-   parse_json(databuf.data() + offset, len - offset, tokarr.get(), json_arrsize);
+   parse_json(databuf.data() + data_offset, len - data_offset, tokarr.get(), json_arrsize);
    if (nullptr == (tok = find_json_token(tokarr.get(), "response")) or
        0 != strncmp(tok->ptr, successfull, tok->len < suclen ? tok->len : suclen))
       throw logging::error(funcname, "unexpected response string: %.*s", tok->len, tok->ptr);
+
+   if (nullptr == (tok = find_json_token(tokarr.get(), "info")))
+      throw logging::error(funcname, "Cannot get info part of response.");
+
+   std::string info;
+   info.append(tok->ptr, tok->len);
+   boost::char_separator<char> sep {" \t\n:;"};
+   boost::tokenizer<boost::char_separator<char>> tokens {info, sep};
+
+   int i = 0;
+   sender_response response;
+
+   for (const auto &token : tokens)
+   {
+      switch (i)
+      {
+         case 1: response.processed = std::stoul(token, nullptr, 10); break;
+         case 3: response.failed    = std::stoul(token, nullptr, 10); break;
+         case 5: response.total     = std::stoul(token, nullptr, 10); break;
+         case 8: response.elapsed   = std::stod(token, nullptr); break;
+         default: break;
+      }
+      i++;
+   }
+
+   return response;
 }

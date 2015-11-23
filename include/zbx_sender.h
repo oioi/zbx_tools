@@ -28,6 +28,9 @@ class tcp_client : private tcp_stream
       ssize_t send(const void *buffer, size_t len, int flags = 0);
       ssize_t recv(void *buffer, size_t len, int flags = 0);
 
+      void set_recv_timeout(const timeval &tv) {
+         setsockopt(sd, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(timeval)); }
+
    private:
       unsigned port;
       std::string peer;
@@ -46,6 +49,14 @@ struct sender_data
    time_t clock;
 };
 
+struct sender_response
+{
+   unsigned processed {};
+   unsigned failed    {};
+   unsigned total     {};
+   double   elapsed   {};
+};
+
 class zbx_sender : private tcp_client
 {
    public:
@@ -53,9 +64,9 @@ class zbx_sender : private tcp_client
          tcp_client{peer, port}, datalen{}, tokarr{new json_token[json_arrsize]} { }
 
       void clear() { data.clear(); }      
-      void send(bool build = true);
+      sender_response send(bool build = true);
       // In case someone wants to build data on their own.
-      void send(const char *data, size_t len) { databuf.clear(); databuf.mappend(data, len); send(false); }
+      sender_response send(const char *data, size_t len) { databuf.clear(); databuf.mappend(data, len); return send(false); }
 
       template <typename T>
       void add_data(const std::string &host, const std::string &key, const T &val, time_t clock = 0);
