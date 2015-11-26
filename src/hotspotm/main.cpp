@@ -12,11 +12,17 @@
 
 namespace {
    conf::section_t db_section {
-      { "hotspots-table", { conf::val_type::string, "hotspots" } },
-      { "clients-table",  { conf::val_type::string, "clients" } }
+      { "hotspots-table", { conf::val_type::string, } },
+      { "clients-table",  { conf::val_type::string, } }
+   };
+
+   conf::section_t mail_section {
+      { "smtp-host", { conf::val_type::string,     } },
+      { "rcpts",     { conf::val_type::multistring } }
    };
 
    const char *progname {"hotspotm"};
+   const char *conffile {"hotspotm.conf"};
 
    time_t data_timestamp;
    hsdata hotspots;
@@ -25,11 +31,11 @@ namespace {
 }
 
 conf::config_map config {
-   { "hostname",  { conf::val_type::string, "172.17.7.200" } },
-   { "username",  { conf::val_type::string, "apiscript"    } },
-   { "password",  { conf::val_type::string, "eHd8&6dt"     } },
-   { "smtp-host", { conf::val_type::string, "smtp://192.168.133.100" } },
-   { "db",        { conf::val_type::section, &db_section   } }
+   { "hostname",  { conf::val_type::string,                } },
+   { "username",  { conf::val_type::string,                } },
+   { "password",  { conf::val_type::string,                } },
+   { "db",        { conf::val_type::section, &db_section   } },
+   { "mail",      { conf::val_type::section, &mail_section } }
 };
 
 void get_hotspots()
@@ -96,9 +102,7 @@ extern "C" {
 void generate_report(time_t rawtime)
 {
    static const char *funcname {"generate_report"};
-   std::vector<std::string> rcpts {
-      "v.petrov@westcall.spb.ru"
-   };
+   const conf::multistring_t &rcpts = config["mail"]["rcpts"].get<conf::multistring_t>();
 
    FILE *fp;
    if (nullptr == (fp = tmpfile())) throw logging::error(funcname, "Cannot open temporary file for e-mail message.");
@@ -111,13 +115,13 @@ void generate_report(time_t rawtime)
                "\r\n"
                "--bound\r\n"
                "Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n"
-               "Unique users per hotspot based on clinet's MAC-address in interval: %f mins\n"
+               "Unique users per hotspot based on client's MAC-address in interval: %f mins\n"
                "<table>\n", (rawtime - data_timestamp) / 60.0);
 
    unsigned long total {};
    for (const auto &hspot : hotspots) 
    {
-      fprintf(fp, "<tr><td>%s</td><td>%lu   </td></tr>\n", hspot.first.c_str(), hspot.second.unique_clients.size());
+      fprintf(fp, "<tr><td>%s   </td><td>%lu</td></tr>\n", hspot.first.c_str(), hspot.second.unique_clients.size());
       total += hspot.second.unique_clients.size();
    }
    fprintf(fp, "<tr><td>Total</td><td>%lu</td></tr>\n</table>\n", total);
@@ -126,7 +130,7 @@ void generate_report(time_t rawtime)
    if (nullptr == (curl = curl_easy_init()))
       throw logging::error(funcname, "curl_easy_init() failed.");
 
-   curl_easy_setopt(curl, CURLOPT_URL, config["smtp-host"].get<conf::string_t>().c_str());
+   curl_easy_setopt(curl, CURLOPT_URL, config["mail"]["smtp-host"].get<conf::string_t>().c_str());
    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, "<hotspotsd@zabbix-iupd.v.westcall.net>");
 
    curl_slist *recipients {};
@@ -279,6 +283,9 @@ int main(void)
    openlog(progname, LOG_PID, LOG_LOCAL7);
 
    try {
+      if (0 == conf::read_config(conffile, config))
+         logger.error_exit(progname, "Error while reading configuration file.");
+
       sqlite_db db("hotspots.db");
       check_data(db);
 
