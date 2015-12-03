@@ -209,6 +209,10 @@ void snmp_trap_prepare(hostdata &host, basic_mysql &db)
    while (std::string::npos != (pos = host.trigger_expr.find('\n', (std::string::npos == pos) ? 0 : pos + 2)))
       host.trigger_expr.replace(pos, sizeof(char), "\\n");
 
+   pos = std::string::npos;
+   while (std::string::npos != (pos = host.trigger_expr.find('\r', (std::string::npos == pos) ? 0 : pos + 2)))
+      host.trigger_expr.replace(pos, sizeof(char), "\\r");
+
    zbx_sess.send_vstr(R"**(
       "method": "item.get",
       "params": {
