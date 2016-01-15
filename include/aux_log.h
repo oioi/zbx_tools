@@ -2,6 +2,8 @@
 #define AUX_LOGGING_H
 
 #include <stdexcept>
+#include <mutex>
+
 #include <syslog.h>
 #include <errno.h>
 #include <string.h>
@@ -38,6 +40,7 @@ class basic_logger
    public:
       int default_priority;
       log_method method;
+      std::mutex mlock;
 
       basic_logger() : default_priority(LOG_INFO), method(log_method::M_SYSLOG) { }
 
@@ -56,6 +59,8 @@ class basic_logger
 
       void write_message(int priority, const char *funcname, const char *format, va_list args);
 };
+
+void default_errstr(buffer &, int, const char *, const char *, va_list);
 
 } // LOGGING NAMESPACE
 

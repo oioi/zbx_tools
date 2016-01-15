@@ -44,6 +44,8 @@ void basic_logger::log_message(int priority, const char *funcname, const char *f
 {
    va_list args;
    va_start(args, format);
+   
+   std::lock_guard<std::mutex> lock {mlock};
    write_message(priority, funcname, format, args);
    va_end(args);
 }
