@@ -102,6 +102,36 @@ bool api_session::json_get_str(const char *json_path, buffer *buf)
    return true;
 }
 
+std::wstring parse_codestring(const std::string &data)
+{
+   std::wstring result;
+   std::string token;
+
+   char ch;
+   wchar_t symbol;
+
+   size_t len = data.size();
+   for (unsigned i = 0; i < len; )
+   {
+      for (; i < len and '\\' != data[i]; i++)
+      {
+         ch = data[i];
+         mbstowcs(&symbol, &ch, 1);
+         result.push_back(symbol);
+      }
+
+      if (i < len and '\\' == data[i] and 'u' == data[i + 1])
+      {
+         token.clear();
+         token.append(data.c_str() + i + 2, 4);
+         symbol = std::stoul(token, nullptr, 16);
+         result.push_back(symbol);
+         i += 6;
+      }
+   }
+
+   return result;
+}
 
 uint_t get_groupid_byname(const std::string &name, api_session &zbx_sess)
 {

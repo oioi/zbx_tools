@@ -91,6 +91,8 @@ class api_session
       int send_json(const char *send_buffer);
 };   
 
+std::wstring parse_codestring(const std::string &data);
+
 uint_t create_group(const std::string &name, api_session &zbx_sess);
 uint_t get_groupid_byname(const std::string &name, api_session &zbx_sess);
 uint_t get_templateid_byname(const std::string &name, api_session &zbx_sess);

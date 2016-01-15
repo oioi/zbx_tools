@@ -13,4 +13,5 @@ target_link_libraries(hotspotm
 
                       confuse
        		      sqlite3
+                      curl
 )
