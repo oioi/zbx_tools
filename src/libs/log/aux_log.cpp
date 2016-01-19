@@ -1,4 +1,5 @@
-#include <stdio.h>
+#include <iostream>
+//#include <stdio.h>
 #include <stdlib.h>
 #include "aux_log.h"
 
@@ -35,9 +36,8 @@ void basic_logger::write_message(int priority, const char *funcname, const char 
 {
    default_errstr(msg_buffer, priority, funcname, format, args);
    if (static_cast<bool>(method & log_method::M_SYSLOG))  syslog(priority, msg_buffer.data());
-   if (static_cast<bool>(method & log_method::M_FILE))    fprintf(logfile, "%s\n", msg_buffer.data());
-   if (static_cast<bool>(method & log_method::M_STDE))    fprintf(stderr, "%s\n", msg_buffer.data());
-   if (static_cast<bool>(method & log_method::M_STDO))    printf("%s\n", msg_buffer.data());
+   if (static_cast<bool>(method & log_method::M_STDE))    std::cerr << msg_buffer.data() << std::endl;
+   if (static_cast<bool>(method & log_method::M_STDO))    std::cout << msg_buffer.data() << std::endl;
 }
 
 void basic_logger::log_message(int priority, const char *funcname, const char *format, ...)
@@ -54,7 +54,10 @@ void basic_logger::error_exit(const char *funcname, const char *format, ...)
 {
    va_list args;
    va_start(args, format);
+
+   std::lock_guard<std::mutex> lock {mlock};   
    write_message(LOG_CRIT, funcname, format, args);
+
    va_end(args);
    exit(LOG_CRIT);
 }

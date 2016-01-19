@@ -14,9 +14,9 @@ namespace logging {
 
 enum class log_method : int {
    M_SYSLOG = 1 << 0,
-   M_FILE   = 1 << 1,
-   M_STDE   = 1 << 2,
-   M_STDO   = 1 << 3
+   M_STDE   = 1 << 1,
+   M_STDO   = 1 << 2,
+//   M_FILE   = 1 << 3
 };
 
 struct error : public std::exception
@@ -40,7 +40,6 @@ class basic_logger
    public:
       int default_priority;
       log_method method;
-      std::mutex mlock;
 
       basic_logger() : default_priority(LOG_INFO), method(log_method::M_SYSLOG) { }
 
@@ -49,13 +48,12 @@ class basic_logger
       void log_message(int priority, const char *funcname, const char *format, ...)
          __attribute__((format(printf,4,5)));
 
-
       __attribute__((noreturn)) void error_exit(const char *funcname, const char *format, ...)
          __attribute__((format(printf,3,4)));      
 
    private:
+      std::mutex mlock;      
       buffer msg_buffer;
-      FILE *logfile;
 
       void write_message(int priority, const char *funcname, const char *format, va_list args);
 };
