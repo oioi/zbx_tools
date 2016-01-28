@@ -4,7 +4,6 @@ namespace snmp {
 
 polltask::polltask(polltask &&other)
 {
-   std::swap(host, other.host);
    std::swap(community, other.community);
 
    request = other.request;
@@ -26,27 +25,26 @@ extern "C" int callback_wrap(int operation, snmp_session *sessp, int reqid, nets
 void mux_poller::poll()
 {
    static const char *funcname {"snmp::mux_poller::poll"};
-
-   size_t tasksize = tasks.size();
-   if (0 == tasksize) return;
+   if (0 == tasks.size()) return;
 
    int fds, block;
    fd_set fdset;
    timeval timeout;
+   taskdata::iterator it = tasks.begin();
 
-   for (unsigned active_hosts, id = 0;;)
+   for (unsigned active_hosts;;)
    {
       active_hosts = sessions.size();
       if (active_hosts < max_hosts)
       {
-         if (0 == active_hosts and id == tasksize) return;
+         if (0 == active_hosts and it == tasks.end()) return;
          unsigned delta = max_hosts - active_hosts;
          void *sessp;
 
-         for (unsigned i = 0; id < tasksize and i < delta; i++, id++)
+         for (unsigned i = 0; it != tasks.end() and i < delta; ++i, ++it)
          {
-            polltask &task = tasks[id];
-            sessp = init_snmp_session(task.host.c_str(), task.community.c_str(),
+            polltask &task = it->second;
+            sessp = init_snmp_session(it->first.c_str(), task.community.c_str(),
                   task.version, callback_wrap, static_cast<void *>(&task));
 
             sessions.emplace_front(sessp);

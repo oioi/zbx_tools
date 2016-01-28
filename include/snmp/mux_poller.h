@@ -2,6 +2,7 @@
 #define SNMP_MUXPOLLER_H
 
 #include <list>
+#include <unordered_map>
 #include "snmp/snmp.h"
 
 namespace snmp {
@@ -18,15 +19,17 @@ enum class pollstate {
    finished
 };
 
+// Used for active hosts. Holding current state and active SNMP session.
 struct polldata
 {
    polldata(void *sessp_ = nullptr) : sessp{sessp_}, state{pollstate::polling} { }
    ~polldata() { if (nullptr != sessp) snmp_sess_close(sessp); }
 
+   polldata(const polldata &other) = delete;
+   polldata & operator =(const polldata &other) = delete;
+
    polldata(polldata &&other) : sessp{other.sessp}, state{other.state} { other.sessp = nullptr; }
-   polldata(polldata &other) = delete;
-   polldata & operator=(polldata &other) = delete;
-   polldata & operator=(polldata &&other) = delete;
+   polldata & operator =(polldata &&other) = delete;
 
    void *sessp;
    pollstate state;
@@ -34,43 +37,48 @@ struct polldata
 
 struct polltask
 {
-   polltask(const char *host_, const char *community_, netsnmp_pdu *request_,
-            callback_wf callback_, void *magic_, long version_) :
-      host{host_}, community{community_}, request{request_},
-      callback{callback_}, magic{magic_}, version{version_} { }
-   ~polltask() { if (nullptr != request) snmp_free_pdu(request); }   
+   polltask(const char *community_, netsnmp_pdu *request_,
+         callback_wf callback_, void *magic_, long version_) :
+      community{community_}, request{request_}, callback{callback_},
+      magic{magic_}, version{version_} { }
+   ~polltask() { if (nullptr != request) snmp_free_pdu(request); }
 
-   polltask(polltask &&other);
-   polltask(polltask &other) = delete;
-   polltask & operator =(polltask &other) = delete;
-   polltask & operator =(polltask &&other) = delete;   
+   polltask(const polltask &other) = delete;
+   polltask & operator =(const polltask &other) = delete;
 
-   std::string host;
+   polltask(polltask &&oter);
+   polltask & operator =(polltask &&other) = delete;
+
    std::string community;
-
    netsnmp_pdu *request;
    callback_wf callback;
-   polldata *pdata;
+   polldata *pdata {};
 
    void *magic;
    long version;
 };
+
+using taskdata = std::unordered_map<std::string, polltask>;
 
 class mux_poller
 {
    public:
       mux_poller(unsigned max_hosts_ = 512) : max_hosts{max_hosts_} { }
 
-      void clear() { tasks.clear(); }
       void add(const char *host, const char *community, netsnmp_pdu *request,
-               callback_wf callback, void *magic = nullptr, long version = default_version) {
-         tasks.emplace_back(host, community, request, callback, magic, version); }
+            callback_wf callback, void *magic = nullptr, long version = default_version)
+      {
+         tasks.emplace(std::piecewise_construct, std::forward_as_tuple(host),
+               std::forward_as_tuple(community, request, callback, magic, version));
+      }
 
+      void clear() { tasks.clear(); }
+      void erase(const char *host) { tasks.erase(host); }
       void poll();
 
    private:
       unsigned max_hosts;
-      std::vector<polltask> tasks;
+      taskdata tasks;
       std::list<polldata> sessions;
 };
 
