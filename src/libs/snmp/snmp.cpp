@@ -45,7 +45,6 @@ void * init_snmp_session(const char *host, const char *community, long version, 
       logger.error_exit(funcname, "%s: got error when callen snmp_sess_open() for host: %s", host, errstr);
    }
 
-
    return sessp;
 }
 
@@ -72,15 +71,13 @@ void async_send(void *sessp, netsnmp_pdu *request)
    }
 }
 
-
 netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request)
 {
    static const char *funcname {"snmp::synch_request"};
    netsnmp_pdu *response;
 
    int status = snmp_sess_synch_response(sessp, request, &response);
-   if (STAT_TIMEOUT == status)
-      throw snmprun_error {funcname, "timeout on request"};
+   if (STAT_TIMEOUT == status) return nullptr;
 
    if (STAT_SUCCESS != status)
       throw snmprun_error {funcname, "failed to perform request."};
@@ -91,6 +88,7 @@ netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request)
          return response;
 
       default:
+         // NOTE: Maybe we should just return PDU and let handle any errors in the level above?
          unsigned long code = response->errstat;
          snmp_free_pdu(response);
          throw snmprun_error {funcname, "error SNMP status in packet: %lu", code};
@@ -121,7 +119,7 @@ std::string print_objid(netsnmp_variable_list *vars)
       throw snmprun_error {funcname, "host returned unexpected ASN type in answer to objid"};
 
    int len = snprint_objid(buffer, bufsize, vars->val.objid, vars->val_len / sizeof(oid));
-   if (-1 == len) throw snmprun_error {funcname, "snprint_objid failed. buffer is not large enoug?"};
+   if (-1 == len) throw snmprun_error {funcname, "snprint_objid failed. buffer is not large enough?"};
    buffer[len] = '\0';
 
    return std::string {buffer};
