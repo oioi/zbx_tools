@@ -52,7 +52,7 @@ void mux_poller::poll()
 
             try { async_send(sessp, snmp_clone_pdu(task.request)); }
             catch (snmprun_error &error) { 
-               throw snmprun_error {funcname, "poll failed: %s", error.what()}; }
+               throw snmprun_error {errtype::runtime, funcname, "poll failed: %s", error.what()}; }
          }
       }
 
@@ -61,7 +61,7 @@ void mux_poller::poll()
       
       for (auto &sess : sessions) snmp_sess_select_info(sess.sessp, &fds, &fdset, &timeout, &block);
       if (0 > (fds = select(fds, &fdset, nullptr, nullptr, &timeout)))
-         throw snmprun_error {funcname, "select() failed: %s", strerror(errno)};
+         throw snmprun_error {errtype::runtime, funcname, "select() failed: %s", strerror(errno)};
 
       if (fds) { for (auto &sess : sessions) snmp_sess_read(sess.sessp, &fdset); }
       else     { for (auto &sess : sessions) snmp_sess_timeout(sess.sessp);      }

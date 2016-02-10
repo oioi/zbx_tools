@@ -26,19 +26,34 @@ enum {
    default_version = SNMP_VERSION_2c
 };
 
-using callback_f = int (*) (int, struct snmp_session *, int, struct snmp_pdu *, void *);
+enum class errtype {
+   timeout,             // Timeout on request
+   invalid_input,       // Invalid input data
+   invalid_data,        // Invalid or unexpected response data in PDU
+   snmp_error,          // Errors in SNMP packet
+   runtime              // Generic runtime error
+};
 
-// In fact this is a kind of duplicate of logging::error struct. But i can't use
-// deriving conveniently, since current compiler is not fully c++11 compilant,
-// so i can't use constructor inheritance with using-declaration.
 struct snmprun_error : public std::exception
+{
+   errtype type;
+   buffer message;
+
+   const char *what() const noexcept { return message.data(); }
+   snmprun_error(errtype type, const char *funcname, const char *format, ...) noexcept
+      __attribute__((format(printf,4,5)));
+   ~snmprun_error() noexcept { }
+};
+
+// Exceptions for runtime errors inside NET-SNMP library itself.
+struct snmplib_error : public std::exception
 {
    buffer message;
 
    const char *what() const noexcept { return message.data(); }
-   snmprun_error(const char *funcname, const char *format, ...) noexcept
+   snmplib_error(const char *funcname, const char *format, ...) noexcept
       __attribute__((format(printf,3,4)));
-   ~snmprun_error() noexcept { }
+   ~snmplib_error() noexcept { }
 };
 
 struct sess_handle
@@ -75,6 +90,7 @@ struct pdu_handle
 
 // Basic facilities
 
+using callback_f = int (*) (int, struct snmp_session *, int, struct snmp_pdu *, void *);
 void * init_snmp_session(const char *host, const char *community, long version = default_version,
                          callback_f callback = nullptr, void *magic = nullptr);
 

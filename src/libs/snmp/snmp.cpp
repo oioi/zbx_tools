@@ -9,7 +9,16 @@ namespace snmp {
     const oid if_broadcast[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 9, 0 };
  }
 
-snmprun_error::snmprun_error(const char *funcname, const char *format, ...) noexcept
+snmprun_error::snmprun_error(errtype type_, const char *funcname, const char *format, ...) noexcept :
+   type{type_}
+{
+   va_list args;
+   va_start(args, format);
+   logging::default_errstr(message, -1, funcname, format, args);
+   va_end(args);
+}
+
+snmplib_error::snmplib_error(const char *funcname, const char *format, ...) noexcept
 {
    va_list args;
    va_start(args, format);
@@ -40,9 +49,10 @@ void * init_snmp_session(const char *host, const char *community, long version, 
       int liberr, syserr;
       char *errstr;
 
-      // If snmp_open failes, we can't actually cope with it, so there is no point in throwing anything.
       snmp_error(&sess, &liberr, &syserr, &errstr);
-      logger.error_exit(funcname, "%s: got error when callen snmp_sess_open() for host: %s", host, errstr);
+      std::string errmsg {errstr};
+      free(errstr);
+      throw snmplib_error {funcname, "%s: got error when callen snmp_sess_open() for host: %s", host, errstr};
    }
 
    return sessp;
@@ -53,9 +63,9 @@ void async_send(void *sessp, netsnmp_pdu *request)
    static const char *funcname {"snmp::async_send"};
 
    if (nullptr == sessp)
-      throw snmprun_error {funcname, "session nullptr"};
+      throw snmprun_error {errtype::invalid_input, funcname, "session nullptr"};
    if (nullptr == request)
-      throw snmprun_error {funcname, "request nullptr"};
+      throw snmprun_error {errtype::invalid_input, funcname, "request nullptr"};
 
    if (0 == snmp_sess_send(sessp, request))
    {
@@ -67,7 +77,7 @@ void async_send(void *sessp, netsnmp_pdu *request)
       std::string errmsg {errstr};
       free(errstr);
 
-      throw snmprun_error {funcname, "snmp_sess_send failed: %s", errmsg.c_str()};
+      throw snmplib_error {funcname, "snmp_sess_send failed: %s", errmsg.c_str()};
    }
 }
 
@@ -77,10 +87,11 @@ netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request)
    netsnmp_pdu *response;
 
    int status = snmp_sess_synch_response(sessp, request, &response);
-   if (STAT_TIMEOUT == status) return nullptr;
+   if (STAT_TIMEOUT == status) throw snmprun_error {errtype::timeout, funcname, "request timeout"};
 
+   // NOTE: Should this be a lib error?
    if (STAT_SUCCESS != status)
-      throw snmprun_error {funcname, "failed to perform request."};
+      throw snmprun_error {errtype::runtime, funcname, "failed to perform request."};
 
    switch (response->errstat)
    {
@@ -91,7 +102,7 @@ netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request)
          // NOTE: Maybe we should just return PDU and let handle any errors in the level above?
          unsigned long code = response->errstat;
          snmp_free_pdu(response);
-         throw snmprun_error {funcname, "error SNMP status in packet: %lu", code};
+         throw snmprun_error {errtype::snmp_error, funcname, "error SNMP status in packet: %lu", code};
    }
 }
 
@@ -116,10 +127,10 @@ std::string print_objid(netsnmp_variable_list *vars)
    static char buffer[bufsize];
 
    if (ASN_OBJECT_ID != vars->type)
-      throw snmprun_error {funcname, "host returned unexpected ASN type in answer to objid"};
+      throw snmprun_error {errtype::invalid_data, funcname, "host returned unexpected ASN type in answer to objid"};
 
    int len = snprint_objid(buffer, bufsize, vars->val.objid, vars->val_len / sizeof(oid));
-   if (-1 == len) throw snmprun_error {funcname, "snprint_objid failed. buffer is not large enough?"};
+   if (-1 == len) throw snmprun_error {errtype::runtime, funcname, "snprint_objid failed. buffer is not large enough?"};
    buffer[len] = '\0';
 
    return std::string {buffer};
@@ -127,13 +138,8 @@ std::string print_objid(netsnmp_variable_list *vars)
 
 std::string get_host_objid(void *sessp)
 {
-   static const char *funcname {"snmp::get_host_objid"};
-
    pdu_handle response;
-   try { response = synch_request(sessp, oids::objid, sizeof(oids::objid) / sizeof(oid)); }
-   catch (snmprun_error &error) { 
-      throw snmprun_error {funcname, "failed to get objID: %s", error.what()}; }
-
+   response = synch_request(sessp, oids::objid, sizeof(oids::objid) / sizeof(oid));
    return print_objid(response.pdu->variables);
 }
 
@@ -149,17 +155,14 @@ intdata get_host_physints(void *sessp)
 
    for (netsnmp_variable_list *vars;;)
    {
-      try { response = synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK); }
-      catch (snmprun_error &error) {
-         throw snmprun_error {funcname, "failed to get host physical interfaces: %s", error.what()}; }
-
+      response = synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK);
       for (vars = response.pdu->variables; nullptr != vars; vars = vars->next_variable)
       {
          if (netsnmp_oid_is_subtree(iftype, sizeof(iftype) / sizeof(oid), vars->name, vars->name_length))
             return ints;
 
          if (ASN_INTEGER != vars->type)
-            throw snmprun_error {funcname, "unexpected ASN type in asnwer to iftype"};
+            throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in asnwer to iftype"};
          if (ethernetCsmacd == *(vars->val.integer) or gigabitEthernet == *(vars->val.integer))
             ints.push_back(*(vars->name + 10));
 
@@ -184,29 +187,29 @@ int_info_st parse_intinfo(netsnmp_variable_list *vars, unsigned id)
       {
          case 0:
             if (ASN_INTEGER != vars->type)
-               throw snmprun_error {funcname, "unexpected ASN type in aswer ot ifoperstatus"};
+               throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in aswer ot ifoperstatus"};
             if (1 == *(vars->val.integer)) info.active = true;
             break;
 
          case 1:
             if (ASN_OCTET_STR != vars->type)
-               throw snmprun_error {funcname, "unexpected ASN type in answer to ifname"};
+               throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in answer to ifname"};
             info.name.append(reinterpret_cast<char *>(vars->val.string), vars->val_len);
             break;
 
          case 2:
             if (ASN_OCTET_STR != vars->type)
-               throw snmprun_error {funcname, "unexpected ASN type in answer to ifalias"};
+               throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in answer to ifalias"};
             info.alias.append(reinterpret_cast<char *>(vars->val.string), vars->val_len);
             break;
 
          case 3:
             if ((ASN_APPLICATION | ASN_INTEGER) != vars->type)
-               throw snmprun_error {funcname, "unexpected ASN type in answer to ifhighspeed"};
+               throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in answer to ifhighspeed"};
             info.speed = *(vars->val.integer);
             break;
 
-         default: throw snmprun_error {funcname, "unexpected step number while parsing interface data"};
+         default: throw snmprun_error {errtype::invalid_data, funcname, "unexpected step number while parsing interface data"};
       }
    }
 

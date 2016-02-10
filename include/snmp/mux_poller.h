@@ -39,7 +39,7 @@ struct polltask
 {
    polltask(const char *community_, netsnmp_pdu *request_,
          callback_wf callback_, void *magic_, long version_) :
-      community{community_}, request{request_}, callback{callback_},
+      community{community_}, request{snmp_clone_pdu(request_)}, callback{callback_},
       magic{magic_}, version{version_} { }
    ~polltask() { if (nullptr != request) snmp_free_pdu(request); }
 
