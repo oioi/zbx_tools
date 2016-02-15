@@ -1,2 +1,3 @@
-zbx_mail: needs to be rewritten to be more 'modular'. Cache must be moved to a separate class.
-logger: if compiled with optimisation flags, in some certain situations call to fprintf inside logger causes segfault. O_O
+1. zbx_mail: needs to be rewritten to be more 'modular'. Cache must be moved to a separate class.
+3. I think i need some kind of general MAIL class.
+4. Maybe it would be good to combine zbx_api and zbx_sender into 'zabbix' lib.
