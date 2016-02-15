@@ -1,13 +1,7 @@
 #include "snmp/snmp.h"
+#include "snmp/oids.h"
 
 namespace snmp {
-
- namespace oids {
-    const oid objid[] = { 1, 3, 6, 1, 2, 1, 1, 2, 0 };
-    const oid tticks[] = { 1, 3, 6, 1, 2, 1, 1, 3, 0 };
-
-    const oid if_broadcast[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 9, 0 };
- }
 
 snmprun_error::snmprun_error(errtype type_, const char *funcname, const char *format, ...) noexcept :
    type{type_}
@@ -52,40 +46,20 @@ void * init_snmp_session(const char *host, const char *community, long version, 
       snmp_error(&sess, &liberr, &syserr, &errstr);
       std::string errmsg {errstr};
       free(errstr);
-      throw snmplib_error {funcname, "%s: got error when callen snmp_sess_open() for host: %s", host, errstr};
+      throw snmplib_error {funcname, "%s: got error when callen snmp_sess_open() for host: %s", host, errmsg.c_str()};
    }
 
    return sessp;
 }
 
-void async_send(void *sessp, netsnmp_pdu *request)
-{
-   static const char *funcname {"snmp::async_send"};
-
-   if (nullptr == sessp)
-      throw snmprun_error {errtype::invalid_input, funcname, "session nullptr"};
-   if (nullptr == request)
-      throw snmprun_error {errtype::invalid_input, funcname, "request nullptr"};
-
-   if (0 == snmp_sess_send(sessp, request))
-   {
-      int liberr, syserr;
-      char *errstr;
-
-      snmp_free_pdu(request);
-      snmp_sess_error(sessp, &liberr, &syserr, &errstr);
-      std::string errmsg {errstr};
-      free(errstr);
-
-      throw snmplib_error {funcname, "snmp_sess_send failed: %s", errmsg.c_str()};
-   }
-}
-
 netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request)
 {
    static const char *funcname {"snmp::synch_request"};
-   netsnmp_pdu *response;
+   if (nullptr == sessp) throw snmprun_error {errtype::invalid_input, funcname, "nullptr session"};
+   if (nullptr == request) throw snmprun_error {errtype::invalid_input, funcname, "nullptr request"};
 
+
+   netsnmp_pdu *response;
    int status = snmp_sess_synch_response(sessp, request, &response);
    if (STAT_TIMEOUT == status) throw snmprun_error {errtype::timeout, funcname, "request timeout"};
 
@@ -106,7 +80,7 @@ netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request)
    }
 }
 
-netsnmp_pdu * synch_request(void *sessp, const oid *reqoid, size_t oidsize, int type = SNMP_MSG_GET, int rep = 0, int max = 60)
+netsnmp_pdu * synch_request(void *sessp, const oid *reqoid, size_t oidsize, int type, int rep, int max)
 {
    netsnmp_pdu *request = snmp_pdu_create(type);
 
@@ -120,16 +94,36 @@ netsnmp_pdu * synch_request(void *sessp, const oid *reqoid, size_t oidsize, int 
    return synch_request(sessp, request);
 }
 
-std::string print_objid(netsnmp_variable_list *vars)
+void async_send(void *sessp, netsnmp_pdu *request)
+{
+   static const char *funcname {"snmp::async_send"};
+   if (nullptr == sessp) throw snmprun_error {errtype::invalid_input, funcname, "session nullptr"};
+   if (nullptr == request) throw snmprun_error {errtype::invalid_input, funcname, "request nullptr"};
+
+   if (0 == snmp_sess_send(sessp, request))
+   {
+      int liberr, syserr;
+      char *errstr;
+
+      snmp_free_pdu(request);
+      snmp_sess_error(sessp, &liberr, &syserr, &errstr);
+      std::string errmsg {errstr};
+      free(errstr);
+
+      throw snmplib_error {funcname, "snmp_sess_send failed: %s", errmsg.c_str()};
+   }
+}
+
+std::string print_objid(netsnmp_variable_list *var)
 {
    static const char *funcname {"snmp::print_objid"};
    static const int bufsize = 128;
    static char buffer[bufsize];
 
-   if (ASN_OBJECT_ID != vars->type)
+   if (ASN_OBJECT_ID != var->type)
       throw snmprun_error {errtype::invalid_data, funcname, "host returned unexpected ASN type in answer to objid"};
 
-   int len = snprint_objid(buffer, bufsize, vars->val.objid, vars->val_len / sizeof(oid));
+   int len = snprint_objid(buffer, bufsize, var->val.objid, var->val_len / sizeof(oid));
    if (-1 == len) throw snmprun_error {errtype::runtime, funcname, "snprint_objid failed. buffer is not large enough?"};
    buffer[len] = '\0';
 
@@ -139,18 +133,18 @@ std::string print_objid(netsnmp_variable_list *vars)
 std::string get_host_objid(void *sessp)
 {
    pdu_handle response;
-   response = synch_request(sessp, oids::objid, sizeof(oids::objid) / sizeof(oid));
+   response = synch_request(sessp, oids::objid, oids::objid_size);
    return print_objid(response.pdu->variables);
 }
 
 intdata get_host_physints(void *sessp)
 {
    static const char *funcname {"snmp::get_host_physints"};
-   static const oid iftype[] = { 1, 3, 6, 1, 2, 1, 2, 2, 1, 3 };
 
-   const oid *oidst = iftype;
-   size_t oidsize = sizeof(iftype) / sizeof(oid);
-   std::vector<unsigned> ints;
+   const oid *oidst = oids::iftype;
+   size_t oidsize = oids::iftype_size - 1;
+
+   intdata ints;
    pdu_handle response;
 
    for (netsnmp_variable_list *vars;;)
@@ -158,7 +152,7 @@ intdata get_host_physints(void *sessp)
       response = synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK);
       for (vars = response.pdu->variables; nullptr != vars; vars = vars->next_variable)
       {
-         if (netsnmp_oid_is_subtree(iftype, sizeof(iftype) / sizeof(oid), vars->name, vars->name_length))
+         if (netsnmp_oid_is_subtree(oids::iftype, oids::iftype_size - 1, vars->name, vars->name_length))
             return ints;
 
          if (ASN_INTEGER != vars->type)
@@ -178,29 +172,29 @@ intdata get_host_physints(void *sessp)
 int_info_st parse_intinfo(netsnmp_variable_list *vars, unsigned id)
 {
    static const char *funcname {"snmp::parse_intinfo"};
-   int_info_st info;
-   info.id = id;
+   int_info_st info {id};
+   int i = 0;
 
-   for (int i = 0; nullptr != vars; vars = vars->next_variable, ++i)
+   for (; nullptr != vars; vars = vars->next_variable, ++i)
    {
       switch (i)
       {
          case 0:
-            if (ASN_INTEGER != vars->type)
-               throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in aswer ot ifoperstatus"};
-            if (1 == *(vars->val.integer)) info.active = true;
-            break;
-
-         case 1:
             if (ASN_OCTET_STR != vars->type)
                throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in answer to ifname"};
             info.name.append(reinterpret_cast<char *>(vars->val.string), vars->val_len);
             break;
 
-         case 2:
+         case 1:
             if (ASN_OCTET_STR != vars->type)
                throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in answer to ifalias"};
             info.alias.append(reinterpret_cast<char *>(vars->val.string), vars->val_len);
+            break;
+
+         case 2:
+            if (ASN_INTEGER != vars->type)
+               throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in aswer ot ifoperstatus"};
+            if (1 == *(vars->val.integer)) info.active = true;
             break;
 
          case 3:
@@ -213,39 +207,33 @@ int_info_st parse_intinfo(netsnmp_variable_list *vars, unsigned id)
       }
    }
 
+   if (4 != i) throw snmprun_error {errtype::invalid_data, funcname, "wrong count of data oids while parsing"};
    return info;
 }
 
-intinfo get_intinfo(void *sessp, intdata &ints)
+intinfo get_intinfo(void *sessp, const intdata &ints)
 {
-   enum {
-      ifoslen = 11,
-      ifnlen = 12,
-      ifalen = 12,
-      ifhslen = 12
-   };
-
-   static oid ifoperstatus[] = { 1, 3, 6, 1, 2, 1, 2, 2, 1, 8, 0 };
-   static oid ifname[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 1, 0 };
-   static oid ifalias[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 18, 0 };
-   static oid ifhighspeed[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 15, 0 };
-
    pdu_handle response;
    netsnmp_pdu *request;
    intinfo info;
 
-   for (auto id : ints)
-   {
-      request = snmp_pdu_create(SNMP_MSG_GET);
-      ifoperstatus[ifoslen - 1] = id;
-      ifname[ifnlen - 1] = id;
-      ifalias[ifalen - 1] = id;
-      ifhighspeed[ifhslen - 1] = id;
+   oid_handle ifname {oids::ifname, oids::ifname_size};
+   oid_handle ifalias {oids::ifalias, oids::ifalias_size};
+   oid_handle ifoperstatus {oids::ifoperstatus, oids::ifoperstatus_size};
+   oid_handle ifhighspeed {oids::ifhighspeed, oids::ifhighspeed_size};
 
-      snmp_add_null_var(request, ifoperstatus, ifoslen);
-      snmp_add_null_var(request, ifname, ifnlen);
-      snmp_add_null_var(request, ifalias, ifalen);
-      snmp_add_null_var(request, ifhighspeed, ifhslen);
+   for (unsigned id : ints)
+   {
+      ifname[oids::ifname_size - 1] = id;
+      ifalias[oids::ifalias_size - 1] = id;
+      ifoperstatus[oids::ifoperstatus_size - 1] = id;
+      ifhighspeed[oids::ifhighspeed_size - 1] = id;
+
+      request = snmp_pdu_create(SNMP_MSG_GET);
+      snmp_add_null_var(request, ifname, oids::ifname_size);
+      snmp_add_null_var(request, ifalias, oids::ifalias_size);
+      snmp_add_null_var(request, ifoperstatus, oids::ifoperstatus_size);
+      snmp_add_null_var(request, ifhighspeed, oids::ifhighspeed_size);
 
       response = synch_request(sessp, request);
       info.push_back(parse_intinfo(response.pdu->variables, id));
@@ -254,4 +242,4 @@ intinfo get_intinfo(void *sessp, intdata &ints)
    return info;
 }
 
-}
+} // SNMP NAMESPACE

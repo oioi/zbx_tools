@@ -1,6 +1,7 @@
-#ifndef COMMON_SNMP_H
-#define COMMON_SNMP_H
+#ifndef SNMPLIB_H
+#define SNMPLIB_H
 
+#include <string>
 #include <vector>
 
 #include <net-snmp/net-snmp-config.h>
@@ -10,20 +11,17 @@
 
 namespace snmp {
 
-namespace oids {
-   extern const oid objid[9];
-   extern const oid tticks[9];
-
-   extern const oid if_broadcast[12];
-}
-
+// Some of interface types defined by IANA (ifType MIB)
 enum iana_iftypes {
    ethernetCsmacd = 6,
    gigabitEthernet = 117
 };
 
 enum {
-   default_version = SNMP_VERSION_2c
+   default_version = SNMP_VERSION_2c,
+   default_pdu_type = SNMP_MSG_GET,
+   default_bulk_repetitions = 0,
+   default_bulk_maxoids = 60
 };
 
 enum class errtype {
@@ -56,15 +54,16 @@ struct snmplib_error : public std::exception
    ~snmplib_error() noexcept { }
 };
 
+// Basic RAII SNMP session handler
 struct sess_handle
 {
    void *ptr;
 
    sess_handle(void *ptr_ = nullptr) : ptr{ptr_} { }
-   void close() { if (nullptr != ptr) { snmp_sess_close(ptr); ptr = nullptr; } }   
+   void close() { if (nullptr != ptr) { snmp_sess_close(ptr); ptr = nullptr; } }
    ~sess_handle() { close(); }
 
-   operator void *() { return ptr; }   
+   operator void *() { return ptr; }
    sess_handle & operator =(void *ptr_)
    {
       if (ptr != ptr_) { if (nullptr != ptr) snmp_sess_close(ptr); ptr = ptr_; }
@@ -72,6 +71,7 @@ struct sess_handle
    }
 };
 
+// Same RAII for SNMP PDU
 struct pdu_handle
 {
    netsnmp_pdu *pdu;
@@ -88,22 +88,62 @@ struct pdu_handle
    }
 };
 
-// Basic facilities
+class oid_handle
+{
+   public:
+      oid_handle(const oid *source, size_t size_) : size{0} { copy(source, size_); }
+      ~oid_handle() { delete [] data; }
+
+      oid_handle(const oid_handle &other) : size{0} { copy(other.data, other.size); }
+      oid_handle(oid_handle &&other) : size{0} { move(other); }
+
+      oid_handle & operator =(const oid_handle &other) { copy(other.data, other.size); return *this; }
+      oid_handle & operator =(oid_handle &&other) { move(other); return *this; }
+
+      operator oid *() { return data; };
+      oid & operator [](unsigned i) { return data[i]; }
+
+   private:
+      oid *data;
+      size_t size;
+
+      void copy(const oid *source, size_t size_)
+      {
+         if (0 != size) delete [] data;
+         size = size_;
+         data = new oid[size];
+         memcpy(data, source, size * sizeof(oid));
+      }
+
+      void move(oid_handle &other)
+      {
+         if (0 != size) delete [] data;
+         size = other.size;
+         data = other.data;
+
+         other.data = nullptr;
+         other.size = 0;
+      }
+};
+
+// Basic facilites
 
 using callback_f = int (*) (int, struct snmp_session *, int, struct snmp_pdu *, void *);
 void * init_snmp_session(const char *host, const char *community, long version = default_version,
                          callback_f callback = nullptr, void *magic = nullptr);
 
 netsnmp_pdu * synch_request(void *sessp, netsnmp_pdu *request);
+netsnmp_pdu * synch_request(void *sessp, const oid *reqoid, size_t oidsize, int type = default_pdu_type,
+                            int rep = default_bulk_repetitions, int max = default_bulk_maxoids);
 void async_send(void *sessp, netsnmp_pdu *request);
 
-std::string print_objid(netsnmp_variable_list *vars);
+std::string print_objid(netsnmp_variable_list *var);
 
 // Specific, but used from time to time
 
-using intdata = std::vector<unsigned>;
-
 std::string get_host_objid(void *sessp);
+
+using intdata = std::vector<unsigned>;
 intdata get_host_physints(void *sessp);
 
 struct int_info_st
@@ -114,12 +154,12 @@ struct int_info_st
    std::string alias;
    unsigned speed;
 
-   int_info_st() : active{false}, speed{} { }
+   int_info_st(unsigned id_ = 0) : id{id_}, active{false}, speed{} { }
 };
 
 using intinfo = std::vector<int_info_st>;
-intinfo get_intinfo(void *sessp, intdata &ints);
+intinfo get_intinfo(void *sessp, const intdata &ints);
 
-}
+} // SNMP NAMESPACE
 
 #endif
