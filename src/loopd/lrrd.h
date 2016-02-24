@@ -6,21 +6,21 @@
 class rrd
 {
    public:
-      rrd(const char *rrdpath_ = nullptr) {
-         if (nullptr != rrdpath_) init(rrdpath_); }
+      void init(const char *rrdpath, unsigned step);
+      void remove();
 
-      void init(const char *rrdpath);
-      void remove();      
+      void graph(const char *filename, const char *title, int xsize = 500, int ysize = 120);
+      void add_data(double val, double mav);
 
    private:
       void create();
-
       bool valid {false};
       std::string rrdpath;
+      unsigned step;
 
       static const char *create_params[];
-//      static const char *update_params[];
-//      static const char *graph_params[];
+      static const char *update_params[];
+      static const char *graph_params[];
 };
 
 #endif

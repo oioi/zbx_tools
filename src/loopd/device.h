@@ -9,67 +9,62 @@
 #include "snmp/snmp.h"
 #include "lrrd.h"
 
-using flagstype = uint8_t;
-enum class devflags : flagstype
+enum class alarmtype
 {
-   delete_mark = 1 << 0,  // Check if device still needs to be monitored after last device list update.
-   init        = 1 << 1,  // Freshly added device - needs to be polled for additional data.
+   none,
+   bcmax,
+   mavmax,
+   spike
 };
 
-enum class hoststate
+struct polldata
 {
-   enabled,     // Host is active and will be polled in each round
-   unreachable, // Device didn't respond for some reason. Will retry for some time.
-   disabled     // We're not trying anymore and host monitoring disabled till next device update round.
-};
-
-inline flagstype & operator |=(flagstype &val, devflags flag) {
-   return val |= static_cast<flagstype>(flag); }
-
-inline flagstype operator ~(devflags flag) { 
-   return ~(static_cast<flagstype>(flag)); }
-
-inline flagstype operator &(flagstype val, devflags flag) {
-   return val & static_cast<flagstype>(flag); }
-
-struct int_info
-{
-   std::string name;   
-   std::string alias;
-
-   bool deletemark {false};
-   bool alarmed {false};
-   rrd rrdata;
-
+   alarmtype alarm {alarmtype::none};
    uint64_t counter {};
-   double lastmav;
-   double prevmav;
-
+   double lastmav {};
+   double prevmav {};
    std::deque<double> mav_vals;
 };
 
-using intsdata = std::unordered_map<unsigned, int_info>;   
+struct int_info
+{
+   unsigned id;
+   std::string name;
+   std::string alias;
+
+   bool delmark {false};
+   rrd rrdata;
+   polldata data;
+};
+
+using intsdata = std::unordered_map<unsigned, int_info>;
 using intpair = std::pair<unsigned, int_info>;
+
+enum class hoststate
+{
+   init,         // Freshly added device - needs to be polled for additional data.
+   enabled,      // Host is active and will be polled on each round.
+   unreachable,  // Device didn't respond for some reason. Will retry for some time.
+   disabled      // Device have never actually reponsed for any request so far.
+};
 
 struct device
 {
    std::string host;
    std::string name;
-   std::string objid;
    std::string community;
    std::string rrdpath;
+   std::string objid;
 
-   flagstype flags;
-   hoststate state;
+   hoststate state {hoststate::init};
+   bool delmark {false};
 
    intsdata ints;
    snmp::pdu_handle generic_req;
-
-   time_t inttime {0};
    time_t timeticks {0};
 
    device(const std::string &host_, const std::string &name_, const std::string &community_, const std::string &rrdpath_) :
-      host{host_}, name{name_}, community{community_}, rrdpath{rrdpath_}, flags{static_cast<flagstype>(devflags::init)} { }
+      host{host_}, name{name_}, community{community_}, rrdpath{rrdpath_} { }
 };
 
 using devsdata = std::unordered_map<std::string, device>;

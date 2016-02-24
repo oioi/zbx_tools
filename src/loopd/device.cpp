@@ -1,11 +1,11 @@
 #include <chrono>
 #include <locale>
 #include <memory>
-#include <set>
 
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "snmp/snmp.h"
 #include "aux_log.h"
 #include "prog_config.h"
 #include "zbx_api.h"
@@ -23,14 +23,44 @@ std::string convertwc(const std::wstring &from)
    return std::string {out.get()};
 }
 
+void create_device(devsdata &devices, const std::string &host, const std::string &name, std::string &community)
+{
+   static const char *funcname {"create_device"};
+   static const conf::string_t &defcom {config["snmp"]["default-community"].get<conf::string_t>()};
+   static const conf::string_t &datadir {config["datadir"].get<conf::string_t>()};
+
+   if (0 == community.size()) community = defcom;
+   devsdata::iterator it = devices.find(host);
+
+   if (devices.end() != it)
+   {
+      if (it->second.name != name or it->second.community != community)
+         logger.log_message(LOG_INFO, funcname, "Device updated %s: '%s' - %s",
+               host.c_str(), name.c_str(), community.c_str());
+
+      it->second.delmark = false;
+      it->second.name = name;
+      it->second.community = community;
+      return;
+   }
+
+   std::string devdir {datadir + '/' + host};
+   // NOTE: Manage with the sutuation, when directory already exists? Handle EEXIST?
+   if (-1 == mkdir(devdir.c_str(), S_IRWXU))
+      throw logging::error {funcname, "failed to create device data directory '%s': %s",
+         devdir.c_str(), strerror(errno)};
+
+   logger.log_message(LOG_INFO, funcname, "Added new device %s: '%s' - %s",
+         host.c_str(), name.c_str(), community.c_str());
+   devices.emplace(std::piecewise_construct, std::forward_as_tuple(host), std::forward_as_tuple(host, name, community, devdir));
+}
+
+
 void parse_zbxdata(devsdata &devices, zbx_api::api_session &zbx_sess)
 {
    static const char *funcname {"parse_zbxdata"};
-   static const conf::string_t &defcomm {config["snmp"]["default-community"].get<conf::string_t>()};
-   static const conf::string_t &datadir {config["datadir"].get<conf::string_t>()};
-
    buffer jsonpath, result;
-   std::string name, host, community;
+   std::string host, name, community;
 
    for (int i = 0; ;i++)
    {
@@ -40,10 +70,10 @@ void parse_zbxdata(devsdata &devices, zbx_api::api_session &zbx_sess)
 
       jsonpath.print("result[%d].name", i);
       if (false == zbx_sess.json_get_str(jsonpath.data(), &result))
-         throw logging::error {funcname, "%s: failed to get hostname.", host.c_str()};
+         throw logging::error {funcname, "%s: failed to get device name", host.c_str()};
 
       name = convertwc(zbx_api::parse_codestring(std::string {result.data()}));
-      community.clear();      
+      community.clear();
 
       for (int j = 0; ;j++)
       {
@@ -59,56 +89,31 @@ void parse_zbxdata(devsdata &devices, zbx_api::api_session &zbx_sess)
          break;
       }
 
-      if (0 == community.size()) community = defcomm;
-      devsdata::iterator it = devices.find(host);
-
-      if (devices.end() == it)
-      {
-         std::string devdir = datadir + '/' + host;
-         // NOTE: Manage with the sutuation, when directory already exists? Handle EEXIST?
-         if (-1 == mkdir(devdir.c_str(), S_IRWXU))
-            throw logging::error {funcname, "failed to create device data directory '%s': %s",
-               devdir.c_str(), strerror(errno)};
-
-         logger.log_message(LOG_INFO, funcname, "Added new device %s: '%s' - %s",
-               host.c_str(), name.c_str(), community.c_str());
-         devices.emplace(std::piecewise_construct, std::forward_as_tuple(host), std::forward_as_tuple(host, name, community, devdir));         
-      }
-
-      else
-      {
-         if (it->second.name != name or it->second.community != community)
-            logger.log_message(LOG_INFO, funcname, "Device updated %s: '%s' - %s",
-                  host.c_str(), name.c_str(), community.c_str());
-
-         it->second.flags &= ~devflags::delete_mark;
-         it->second.name = name;
-         it->second.community = community;         
-      }
+      create_device(devices, host, name, community);
    }
 }
 
-void init_device(devpair &device)
+void init_device(device &devdata)
 {
    static const char *funcname {"init_device"};
-   static const conf::string_t &defcom = config["snmp"]["default-community"].get<conf::string_t>();
+   static const conf::string_t &defcom {config["snmp"]["default-community"].get<conf::string_t>()};
 
-   const char *host = device.first.c_str();
+   const char *host = devdata.host.c_str();
    snmp::sess_handle sessp;
    std::string objid;
 
-   try 
+   try
    {
-      sessp = snmp::init_snmp_session(host, device.second.community.c_str());
+      sessp = snmp::init_snmp_session(host, devdata.community.c_str());
       objid = snmp::get_host_objid(sessp);
    }
 
    catch (snmp::snmprun_error &error)
    {
-      if (device.second.community == defcom)
+      if (devdata.community == defcom)
       {
          logger.log_message(LOG_INFO, funcname, "%s: device init failed: %s", host, error.what());
-         device.second.state = hoststate::disabled;
+         devdata.state = hoststate::disabled;
          return;
       } 
 
@@ -122,31 +127,32 @@ void init_device(devpair &device)
       catch (snmp::snmprun_error &error)
       {
          logger.log_message(LOG_INFO, funcname, "%s: device is not responding with any of known communities.", host);
-         device.second.state = hoststate::disabled;
+         devdata.state = hoststate::disabled;
          return;
       }
    }
 
-   if (0 != device.second.objid.size() and objid != device.second.objid)
+   if (0 != devdata.objid.size() and objid != devdata.objid)
    {
       logger.log_message(LOG_INFO, funcname, "%s: device type has changed from %s to %s",
-            host, device.second.objid.c_str(), objid.c_str());
+            host, devdata.objid.c_str(), objid.c_str());
       // NOTE: Should we clear interfaces?
    }
 
-   device.second.objid = objid;
-   device.second.state = hoststate::enabled;
-   logger.log_message(LOG_INFO, funcname, "%s: device initialized with type: %s", host, objid.c_str());
+   devdata.objid = objid;
+   devdata.state = hoststate::enabled;
+   logger.log_message(LOG_INFO, funcname, "%s: device initialized with type: %s", host, objid.c_str());   
 }
 
-void update_ints(devpair &device)
+void update_ints(device &devdata)
 {
    static const char *funcname {"update_ints"};
+   static const conf::integer_t seconds {config["poller"]["poll_interval"].get<conf::integer_t>()};
    snmp::intinfo info;
 
-   try 
+   try
    {
-      snmp::sess_handle sessp {snmp::init_snmp_session(device.first.c_str(), device.second.community.c_str())};
+      snmp::sess_handle sessp {snmp::init_snmp_session(devdata.host.c_str(), devdata.community.c_str())};
       snmp::intdata ints {snmp::get_host_physints(sessp)};
       info = snmp::get_intinfo(sessp, ints);
    }
@@ -154,50 +160,52 @@ void update_ints(devpair &device)
    catch (snmp::snmprun_error &error)
    {
       logger.log_message(LOG_WARNING, funcname, "%s: device's interfaces update failed: %s",
-            device.first.c_str(), error.what());
-      device.second.state = hoststate::disabled;
-   }   
+            devdata.host.c_str(), error.what());
+      devdata.state = hoststate::unreachable;
+   }
 
-   for (auto &i : device.second.ints) i.second.deletemark = true;
    buffer rrdpath;
+   for (auto &intf : devdata.ints) intf.second.delmark = true;
 
    for (auto &inti : info)
    {
       if (false == inti.active) continue;
-      int_info &it = device.second.ints[inti.id];
+      int_info &it = devdata.ints[inti.id];
+
+      it.id = inti.id;
       it.alias = inti.alias;
-      it.deletemark = false;
+      it.delmark = false;
 
       if (0 != it.name.size())
       {
          logger.log_message(LOG_INFO, funcname, "%s: updated interface %u: %s - %s",
-               device.first.c_str(), inti.id, inti.name.c_str(), inti.alias.c_str());
+               devdata.host.c_str(), inti.id, inti.name.c_str(), inti.alias.c_str());
          continue;
       }
 
       logger.log_message(LOG_INFO, funcname, "%s: added interface %u: %s - %s",
-            device.first.c_str(), inti.id, inti.name.c_str(), inti.alias.c_str());
-      it.name = it.name;
-      rrdpath.print("%s/%u.rrd", device.second.rrdpath.c_str(), inti.id);
-      it.rrdata.init(rrdpath.data());
+            devdata.host.c_str(), inti.id, inti.name.c_str(), inti.alias.c_str());
+      it.name = inti.name;
+
+      rrdpath.print("%s/%u.rrd", devdata.rrdpath.c_str(), inti.id);
+      it.rrdata.init(rrdpath.data(), seconds);
    }
 }
 
-void update_devices(devsdata *devices, std::atomic<bool> *updating)
+void update_devdata(devsdata *devices)
 {
-   static const char *funcname {"update_devices"};
-
+   static const char *funcname {"update_devdata"};
    zbx_api::api_session zbx_sess;
    zbx_sess.set_auth(config["zabbix"]["api-url"].get<conf::string_t>(),
                      config["zabbix"]["username"].get<conf::string_t>(),
                      config["zabbix"]["password"].get<conf::string_t>());
 
    std::chrono::steady_clock::time_point start {std::chrono::steady_clock::now()};
-   const conf::multistring_t &groups {config["devgroups"].get<conf::multistring_t>()};
+   const conf::multistring_t &groups = {config["devgroups"].get<conf::multistring_t>()};
    std::vector<unsigned long> groupids;
 
    for (const auto &group : groups) groupids.push_back(zbx_api::get_groupid_byname(group, zbx_sess));
-   for (auto &device : *devices) device.second.flags |= devflags::delete_mark;
+   for (auto &device : *devices) device.second.delmark = true;
 
    for (const auto &groupid : groupids)
    {
@@ -211,22 +219,37 @@ void update_devices(devsdata *devices, std::atomic<bool> *updating)
       parse_zbxdata(*devices, zbx_sess);       
    }
 
-   unsigned deletemark {}, inactive {};
+   unsigned delmark {}, inactive {};
    for (auto &device : *devices)
    {
-      if (device.second.flags & devflags::delete_mark) { deletemark++; continue; }
-      if (device.second.flags & devflags::init) init_device(device);
-      if (hoststate::disabled == device.second.state)  { inactive++; continue; }      
-      update_ints(device);
+      if (device.second.delmark) { delmark++; continue; };
+      if (hoststate::init == device.second.state) init_device(device.second);
+      if (hoststate::enabled != device.second.state) { inactive++; continue; }
+      update_ints(device.second);
    }
 
    // So we have updated datamap of devices with corresponding interfaces. Devices which were not received again from zabbix are
    // marked to be deleted. Same thing with interfaces. Since updating is performed in a separate thread, we're not
    // actually releasing any resources from here. Main thread will be signaled that data is updated. It will check any
-   // resourced marked for deletion and release them appropriately. All new devices and interfaces are already initialized.
-   *updating = false;
+   // resourced marked for deletion and release them appropriately. All new devices and interfaces are already initialized.   
    std::chrono::duration<double> elapsed {std::chrono::steady_clock::now() - start};
    logger.log_message(LOG_INFO, funcname, "Updated devices in %fs. Total: %lu. Inactive: %u. Marked for deletion: %u",
-         elapsed.count(), devices->size(), inactive, deletemark);
+         elapsed.count(), devices->size(), inactive, delmark);   
 }
 
+void update_devices(devsdata *devices, std::atomic<bool> *updating)
+{
+   static const char *funcname {"update_devices"};
+
+   try { update_devdata(devices); }
+
+   catch (logging::error &error) {
+      logger.error_exit(funcname, "Exception thrown in updater thread: %s", error.what());
+   }
+
+   catch (...) {
+      logger.error_exit(funcname, "Updater thread aborted by generic catch clause.");
+   }
+
+   *updating = false;
+}

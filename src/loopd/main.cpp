@@ -1,16 +1,12 @@
 #include <chrono>
-#include <locale>
-#include <atomic>
-#include <thread>
-#include <limits>
+#include <cmath>
 
 #include "snmp/mux_poller.h"
-
 #include "aux_log.h"
 #include "prog_config.h"
 
-#include "device.h"
-#include "main.h"
+#include "data.h"
+#include "worker.h"
 
 using std::chrono::steady_clock;
 
@@ -25,16 +21,27 @@ namespace {
    };
 
    conf::config_map poller_section {
-      { "update_interval", { conf::val_type::integer } },
-      { "poll_interval",   { conf::val_type::integer } },
-      { "mavsize",         { conf::val_type::integer } }
+      { "update_interval",  { conf::val_type::integer } },
+      { "poll_interval",    { conf::val_type::integer } },
+      { "recheck_interval", { conf::val_type::integer } },
+
+      { "mavsize",         { conf::val_type::integer } },
+      { "bcmax",           { conf::val_type::integer } },
+      { "mavmax",          { conf::val_type::integer } },
+      { "recover_ratio",   { conf::val_type::integer } }
+   };
+
+   conf::config_map notif_section {
+      { "image-width" ,  { conf::val_type::integer } },
+      { "image-height",  { conf::val_type::integer } },
+      { "from",          { conf::val_type::string  } },
+      { "rcpts",         { conf::val_type::multistring } },
+      { "smtphost",      { conf::val_type::string } }
    };
 
    conf::config_map snmp_section {
       { "default-community", { conf::val_type::string } }
    };
-
-   std::vector<device *> action_queue;
 }
 
 conf::config_map config {
@@ -43,51 +50,53 @@ conf::config_map config {
    { "zabbix",    { conf::val_type::section, &zabbix_section } },
    { "snmp",      { conf::val_type::section, &snmp_section   } },
    { "poller",    { conf::val_type::section, &poller_section } },
+   { "notifier",  { conf::val_type::section, &notif_section  } },
 
    { "datadir",   { conf::val_type::string      } }, 
    { "devgroups", { conf::val_type::multistring } },
 };
 
-void prepare_data(devsdata &maind, devsdata &newd)
-{
-   static const char *funcname {"prepare_data"};
-   std::swap(maind, newd);
+devsdata devices;
+devtasks action_data, action_queue;
+inttasks alarm_data, alarm_queue;
 
-   std::vector<unsigned> intdel;   
+snmp::mux_poller poller;
+thread_sync syncdata;
+
+void transfer_data(devsdata &maind, devsdata &repld)
+{
+   static const char *funcname {"transfer_data"};
+   std::swap(maind, repld);
+
+   std::vector<unsigned> intdel;
    std::vector<std::string> devdel;
 
-   const size_t ifbc_len = sizeof(snmp::oids::if_broadcast) / sizeof(oid);
-   oid ifbc[ifbc_len];
-   memcpy(ifbc, snmp::oids::if_broadcast, sizeof(snmp::oids::if_broadcast));   
+   devsdata::iterator devit;
+   intsdata::iterator intit;
 
    for (auto &device : maind)
    {
-      if (device.second.flags & devflags::delete_mark)
+      if  (device.second.delmark)
       {
-         for (auto &i : device.second.ints) i.second.rrdata.remove();
+         for (auto &ints : device.second.ints) ints.second.rrdata.remove();
          remove(device.second.rrdpath.c_str());
          devdel.push_back(device.first);
          continue;
       }
 
       intdel.clear();
-      device.second.generic_req = snmp_pdu_create(SNMP_MSG_GET);
-      snmp_add_null_var(device.second.generic_req, snmp::oids::objid, sizeof(snmp::oids::objid) / sizeof(oid));
-      snmp_add_null_var(device.second.generic_req, snmp::oids::tticks, sizeof(snmp::oids::tticks) / sizeof(oid));
-
-      for (auto &i : device.second.ints)
+      for (auto &intf : device.second.ints)
       {
-         if (i.second.deletemark)
+         if (intf.second.delmark)
          {
-            i.second.rrdata.remove();
-            intdel.push_back(i.first);
+            intf.second.rrdata.remove();
+            intdel.push_back(intf.first);
             continue;
          }
 
-         // NOTE: Transfer actual interface data somewhere here?
-
-         ifbc[ifbc_len - 1] = i.first;
-         snmp_add_null_var(device.second.generic_req, ifbc, ifbc_len);
+         if (repld.end() != (devit = repld.find(device.first)) and
+             devit->second.ints.end() != (intit = devit->second.ints.find(intf.first))) 
+            intf.second.data = intit->second.data;
       }
 
       for (auto n : intdel)
@@ -96,98 +105,74 @@ void prepare_data(devsdata &maind, devsdata &newd)
                device.first.c_str(), n);
          device.second.ints.erase(n);
       }
+
+      if (hoststate::enabled == device.second.state) prepare_request(device.second);
    }
 
    for (auto n : devdel) 
    {
       logger.log_message(LOG_INFO, funcname, "%s: deleted marked device", n.c_str());
       maind.erase(n);
+   }   
+}
+
+void rebuild_poller()
+{
+   poller.clear();
+   for (auto &device : devices)
+   {
+      if (hoststate::enabled != device.second.state) continue;
+      poller.add(device.first.c_str(), device.second.community.c_str(),
+            device.second.generic_req, callback, static_cast<void *>(&(device.second)));
    }
 }
 
-void process_intdata(device *dev, netsnmp_variable_list *vars, double timedelta)
+void prepare_data(devsdata &maind, devsdata &newd, std::thread &worker_thread)
 {
-   static const char *funcname {"process_intdata"};
-   static unsigned mavsize = config["poller"]["mavsize"].get<conf::integer_t>();
-
-   uint64_t counter;
-   intsdata::iterator it;
-
-   for (unsigned i = 0; nullptr != vars; vars = vars->next_variable, i++)
+   // Waiting for worker thread to finish his current jobs and exit. Worker should complete all his alarm
+   // notification jobs before exiting. All data has to be rebuilt because all pointers will be invalidated
+   // after dataswap.
+   if (worker_thread.joinable())
    {
-      if (ASN_COUNTER64 != vars->type)
-         throw logging::error {funcname, "%s: unexpected ASN type in asnwer to ifbroadcast oid", dev->host.c_str()};
+      syncdata.statelock.lock();
+      syncdata.running = false;
 
-      if (dev->ints.end() == (it = dev->ints.find(*(vars->name + 11))))
-         throw logging::error {funcname, "%s: host returned PDU with broadcast counter for unknown interface: %lu",
-            dev->host.c_str(), *(vars->name + 11)};
-
-      counter = vars->val.counter64->high << 32 | vars->val.counter64->low;      
-      if (0 == it->second.counter)
-      {
-         it->second.counter = counter;
-         continue;
-      }
-
-      // NOTE: I'm not sure this is correct. Still SNMPv2 states HC counters should be 64-bit.
-      // So maybe we're calculating this right.
-      double delta = (counter > it->second.counter) ? 
-         (double) (counter - it->second.counter) / timedelta :
-         (double) ((std::numeric_limits<uint64_t>::max() - it->second.counter) + counter) / timedelta;
-      it->second.mav_vals.push_front(delta);
-
-      // prevmav holds 'normal' MM level before alarm was triggered.
-      if (false == it->second.alarmed) it->second.prevmav = it->second.lastmav;      
-
-      size_t msize = it->second.mav_vals.size();
-
-
-      
-
-
+      if (syncdata.sleeping) { syncdata.sleeping = false; syncdata.wake.notify_all(); }
+      syncdata.statelock.unlock();
+      worker_thread.join();
    }
 
+   transfer_data(maind, newd);
+   action_data.clear();
 
+   for (auto &device : maind) {
+      if (hoststate::enabled != device.second.state) 
+         action_data.push_back(&(device.second));
+   }
+
+   rebuild_poller();
+   syncdata.running = true;
+   worker_thread = std::thread{worker, &syncdata};
 }
 
-int callback(int operation, snmp_session *, int, netsnmp_pdu *pdu, void *magic, void *)
+void add_jobs()
 {
-   static const char *funcname {"callback"};
-   device *dev = static_cast<device *>(magic);
+   syncdata.worker_datalock.lock();
+   for (auto &entry : alarm_queue) alarm_data.push_back(entry);
 
-   if (NETSNMP_CALLBACK_OP_RECEIVED_MESSAGE == operation)
+   for (auto &entry : action_queue)
    {
-      netsnmp_variable_list *vars = pdu->variables;
-      std::string objid {snmp::print_objid(vars)};
-
-      if (objid != dev->objid)
-      {
-         logger.log_message(LOG_INFO, funcname, "%s: device type has changed. "
-               "PDU ignored. Device will be reinitialized.", dev->host.c_str());
-         dev->flags |= devflags::init;
-         action_queue.push_back(dev);
-         return snmp::ok_close;
-      }
-
-      vars = vars->next_variable;
-      if (ASN_TIMETICKS != vars->type)
-         throw logging::error {funcname, "%s: unexpected ASN type in answer to timeticks", dev->host.c_str()};
-
-      int timedelta = (*(vars->val.integer) - dev->timeticks) / 100;
-      dev->timeticks = *(vars->val.integer);
-      process_intdata(dev, vars->next_variable, timedelta);
-   }
-   
-   else
-   {
-      // NOTE: What to do with devices that don't respond any more? It can be a lot of them,
-      // therefore we can't let ourselves to waste much time on timeouts. But we can't actually
-      // just disable them, because device might be not responding due to actual network problem.
-      // Additional thread to handle this type of devices?
-
+      poller.erase(entry->host.c_str());
+      action_data.push_back(entry);
    }
 
-   return snmp::ok_close;
+   alarm_queue.clear();
+   action_queue.clear();
+   syncdata.worker_datalock.unlock();
+
+   syncdata.statelock.lock();
+   if (syncdata.sleeping) { syncdata.sleeping = false; syncdata.wake.notify_all(); }
+   syncdata.statelock.unlock();
 }
 
 void mainloop()
@@ -199,40 +184,35 @@ void mainloop()
    const std::chrono::hours update_interval {config["poller"]["update_interval"].get<conf::integer_t>()};
    const std::chrono::seconds poll_interval {config["poller"]["poll_interval"].get<conf::integer_t>()};
 
-   devsdata devices;
+   std::thread worker_thread;
+
+   // Data to synchronize with updater thread.
    bool update_started {false};
    std::atomic<bool> updating {false};
-   devsdata *newdata {};   
+   devsdata *newdata {};
 
    steady_clock::time_point begin, last_update {steady_clock::now()};
    std::chrono::hours since_update;
-   snmp::mux_poller poller;
 
    for (;;)
    {
       begin = steady_clock::now();
       poller.poll();
-      
-      since_update = std::chrono::duration_cast<std::chrono::hours>(begin - last_update);
+
       if (update_started and !updating)
       {
          logger.log_message(LOG_INFO, funcname, "device update finished. swapping data %lu -> %lu",
                newdata->size(), devices.size());
-         update_started = false;         
-         prepare_data(devices, *newdata);
-         delete newdata;
+         update_started = false;
 
-         poller.clear();
-         for (auto &device : devices)
-         {
-            if (hoststate::enabled != device.second.state) continue;
-            poller.add(device.first.c_str(), device.second.community.c_str(), 
-                device.second.generic_req, callback, static_cast<void *>(&(device.second)));
-         }
+         prepare_data(devices, *newdata, worker_thread);
+         delete newdata;
       }
 
+      since_update = std::chrono::duration_cast<std::chrono::hours>(begin - last_update);      
       if (0 == devices.size() or update_interval <= since_update)
       {
+         std::lock_guard<std::mutex> lock {syncdata.device_datalock};
          update_started = updating = true;
          newdata = new devsdata(devices);
 
@@ -240,19 +220,16 @@ void mainloop()
          last_update = steady_clock::now();
       }
 
-      std::cout << "Sleeping: " << (poll_interval - std::chrono::duration_cast<std::chrono::seconds>(steady_clock::now() - begin)).count() << std::endl;
-      sleep((poll_interval - std::chrono::duration_cast<std::chrono::seconds>(steady_clock::now() - begin)).count());
+      // NOTE: Check updates from worker thread.
+
+      if (0 != action_queue.size() or 0 != alarm_queue.size()) add_jobs();
+      std::this_thread::sleep_for(poll_interval - std::chrono::duration_cast<std::chrono::seconds>(steady_clock::now() - begin));
    }
-} 
+}
 
-int main(void)
+int main()
 {
-   /*
-   openlog(progname, LOG_PID, LOG_LOCAL7);
-   daemonize(); 
-   */
-
-   std::setlocale(LC_ALL, "en_US.UTF-8");   std::unordered_map<std::string, device *> action_queue;
+   std::setlocale(LC_ALL, "en_US.UTF-8");
    logger.method = logging::log_method::M_STDE;
 
    try {
@@ -270,7 +247,7 @@ int main(void)
    }
 
    catch (...) {
-      logger.error_exit(progname, "Aborted by generic exception. Something went really bad.");
+      logger.error_exit(progname, "Aborted by generic catch. Something went really bad.");
    }
 
    return 0;

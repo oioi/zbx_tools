@@ -1,6 +1,6 @@
 project(loopd)
-set (HEADERS main.h device.h lrrd.h)
-set (SOURCES main.cpp device.cpp lrrd.cpp)
+set (HEADERS device.h data.h worker.h lrrd.h)
+set (SOURCES device.cpp worker.cpp lrrd.cpp data.cpp main.cpp)
 
 add_executable(loopd ${SOURCES} ${HEADERS})
 target_link_libraries(loopd
