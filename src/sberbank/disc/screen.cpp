@@ -6,16 +6,25 @@
 
 #include "data.h"
 
+extern conf::config_map zabbix;
+static const std::string totalname {"total"};
+
 void generate_screen_names(ordered_points &hotspots)
 {
-   const conf::string_t &datadir {config["zabbix"]["screendir"].get<conf::string_t>() + '/'};
-   const conf::string_t &url_prefix {config["zabbix"]["scrurl-prefix"].get<conf::string_t>() + '/'};
+   const conf::string_t &datadir {config["zabbix-ext"]["screendir"].get<conf::string_t>() + '/'};
+   const conf::string_t &url_prefix {config["zabbix-ext"]["scrurl-prefix"].get<conf::string_t>() + '/'};
 
    std::hash<std::string> hash_fn;
    buffer filename;
 
    for (auto &hspot : hotspots)
    {
+      if (totalname == hspot.first)
+      {
+         hspot.second.nameurl = url_prefix + "total.html";
+         continue;
+      }
+
       size_t addrhash = hash_fn(hspot.first);
       filename.print("%lu.html", addrhash);
 
@@ -62,6 +71,15 @@ void get_graph_ids(zbx_api::api_session &zbx_sess, ordered_points &hotspots, uns
 
    for (auto &hspot : hotspots)
    {
+      if (totalname == hspot.first)
+      {
+         itemkey.print("users[total]");
+         get_graph_byitem(zbx_sess, hostid, itemkey.data(), &(hspot.second.int_users_graphid));
+
+         itemkey.print("authorized[total]");
+         get_graph_byitem(zbx_sess, hostid, itemkey.data(), &(hspot.second.ext_users_graphid));
+      }
+
       if (0 != hspot.second.int_vlan.size())
       {
          itemkey.print("INT_ifHCInOctets[%u]", hspot.second.int_id);
@@ -82,18 +100,20 @@ void get_graph_ids(zbx_api::api_session &zbx_sess, ordered_points &hotspots, uns
    }
 }
 
-buffer generate_screen_items(const ordered_points &hotspots, unsigned *vsize)
+buffer generate_screen_items(ordered_points &hotspots, unsigned *vsize)
 {
    unsigned y {};
    buffer items;
 
    for (const auto &hspot : hotspots)
    {
+      if (totalname == hspot.first) continue;
       const addr_point_data &data = hspot.second;
 
       items.append("{\"resourcetype\": \"11\", \"colspan\": \"2\", \"height\": \"45\", "
                     "\"url\": \"%s\", \"width\": \"800\", \"x\": \"0\", \"y\": \"%u\"},",
                      data.nameurl.c_str(), y++);
+
       if (0 == data.int_traffic_graphid or 0 == data.ext_traffic_graphid)
       {
          items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
@@ -121,8 +141,21 @@ buffer generate_screen_items(const ordered_points &hotspots, unsigned *vsize)
 
       items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
                     "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"0\", \"y\": \"%u\"},",
-                    data.ext_users_graphid, y++);      
+                    data.ext_users_graphid, y++);    
    }
+
+   const addr_point_data &data = hotspots[totalname];
+   items.append("{\"resourcetype\": \"11\", \"colspan\": \"2\", \"height\": \"45\", "
+                 "\"url\": \"%s\", \"width\": \"800\", \"x\": \"0\", \"y\": \"%u\"},",
+                  data.nameurl.c_str(), y++);
+
+   items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
+                 "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"1\", \"y\": \"%u\"},",
+                  data.int_users_graphid, y);
+
+   items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
+                 "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"0\", \"y\": \"%u\"},",
+                 data.ext_users_graphid, y++);   
 
    *vsize = y;
    items.pop_back();
@@ -134,9 +167,9 @@ void rebuild_screen(ordered_points &hotspots, const std::string &hostname)
    static const char *funcname {"rebuild_screen"};
 
    zbx_api::api_session zbx_sess;
-   zbx_sess.set_auth(config["zabbix"]["api-url"].get<conf::string_t>(),
-                     config["zabbix"]["username"].get<conf::string_t>(),
-                     config["zabbix"]["password"].get<conf::string_t>());
+   zbx_sess.set_auth(zabbix["api-url"].get<conf::string_t>(),
+                     zabbix["username"].get<conf::string_t>(),
+                     zabbix["password"].get<conf::string_t>());
 
    zbx_sess.send_vstr(R"**(
       "method": "host.get",
@@ -149,7 +182,7 @@ void rebuild_screen(ordered_points &hotspots, const std::string &hostname)
    if (false == zbx_sess.json_get_uint("result[0].hostid", &hostid))
       throw logging::error {funcname, "Failed to obtaing hostid for host: %s", hostname.c_str()};
 
-   const char *screen_name {config["zabbix"]["screen-name"].get<conf::string_t>().c_str()};
+   const char *screen_name {config["zabbix-ext"]["screen-name"].get<conf::string_t>().c_str()};
 
    zbx_sess.send_vstr(R"**(
       "method": "screen.get",
@@ -177,7 +210,7 @@ void rebuild_screen(ordered_points &hotspots, const std::string &hostname)
 
 void build_screen(const points &source, const std::string &hostname)
 {
-   ordered_points hotspots;
+   ordered_points hotspots { { totalname, { } } };
 
    for (auto &hspot : source)
    {

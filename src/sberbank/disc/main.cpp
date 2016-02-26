@@ -16,9 +16,10 @@
 
 namespace {
    const char *progname {"sba-disc"};
-   const char *conffile {"/etc/zabbix/sba-disc.conf"};
+   const char *conffile {"/etc/zabbix/sberbank/sba-disc.conf"};
+   const char *zbx_conffile {"/etc/zabbix/sberbank/zabbix-api.conf"};
 
-   conf::config_map db_section = {
+   conf::config_map db_section {
       { "host",     { conf::val_type::string } },
       { "username", { conf::val_type::string } },
       { "password", { conf::val_type::string } },
@@ -26,20 +27,22 @@ namespace {
       { "table",    { conf::val_type::string } }
    };
 
-   conf::config_map zabbix_section = {
-      { "api-url",   { conf::val_type::string } },
-      { "username",  { conf::val_type::string } },
-      { "password",  { conf::val_type::string } },
-
+   conf::config_map zabbix_extsection {
       { "screendir",     { conf::val_type::string } },
       { "scrurl-prefix", { conf::val_type::string } },
       { "screen-name",   { conf::val_type::string } }
    };
 }
 
-conf::config_map config = {
-   { "database", { conf::val_type::section, &db_section     } },
-   { "zabbix",   { conf::val_type::section, &zabbix_section } },
+conf::config_map zabbix {
+   { "api-url",   { conf::val_type::string } },
+   { "username",  { conf::val_type::string } },
+   { "password",  { conf::val_type::string } }
+};
+
+conf::config_map config {
+   { "database",   { conf::val_type::section, &db_section        } },
+   { "zabbix-ext", { conf::val_type::section, &zabbix_extsection } },
 
    { "lockfile",  { conf::val_type::string  } },
    { "sleeptime", { conf::val_type::integer } }
@@ -167,12 +170,15 @@ void run(const std::string &hostname, const std::string &community)
 
 int main(int argc, char *argv[])
 {
-   logger.method = logging::log_method::M_STDE;
+   openlog(progname, LOG_PID, LOG_LOCAL7);
    if (4 != argc) logger.error_exit(progname, "%s: wrong arg count: [ip] [snmp_community] [placeholder]", argv[0]);
 
    try {
       if (0 == conf::read_config(conffile, config))
          logger.error_exit(progname, "Errors while reading configuration file.");
+
+      if (0 == conf::read_config(zbx_conffile, zabbix))
+         logger.error_exit(progname, "Error while reading zabbix configuration file.");
 
       std::string hostname {argv[1]};
       std::string community {argv[2]};
