@@ -1,8 +1,8 @@
 #include <boost/regex.hpp>
-#include <iostream>
 #include <string>
 #include <vector>
 
+#include <cstdio>
 #include <fcntl.h>
 
 #include "snmp/snmp.h"
@@ -128,7 +128,7 @@ points discover(const std::string &hostname, const std::string &community)
    json.pop_back();
    json.append("]}");
 
-   std::cout << json.data();
+   printf(json.data());
    return hotspots;
 }
 
@@ -152,20 +152,20 @@ void run(const std::string &hostname, const std::string &community)
    if (EEXIST != errno) logger.error_exit(progname, "Failed to create lockfile '%s': %s",
          lockfile.c_str(), strerror(errno));
 
+   // closing descriptors, so zabbix will think that we're done.
+   fflush(nullptr);
+   close(STDOUT_FILENO);
+   close(STDERR_FILENO);   
+
    pid_t fpid = fork();
    if (0 > fpid) logger.error_exit(progname, "Process fork failed: %s", strerror(errno));
    if (0 < fpid) return;
-
-   // Closing descriptors, so Zabbix will think that we're done.
-   close(STDOUT_FILENO);
-   close(STDERR_FILENO);
 
    // Waiting for discover data to be proccessed by Zabbix
    // then rebuilding screen.
    sleep(config["sleeptime"].get<conf::integer_t>());
    build_screen(hotspots, hostname);
    remove(lockfile.c_str());
-   return;
 }
 
 int main(int argc, char *argv[])

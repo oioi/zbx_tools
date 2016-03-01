@@ -134,10 +134,11 @@ void parse_internal(Block &block)
 
 void poll_device(const std::string &hostname)
 {
-   MikrotikAPI api = MikrotikAPI(
-         hostname.c_str(),
-         config["username"].get<conf::string_t>().c_str(),
-         config["password"].get<conf::string_t>().c_str(), 8728);
+   MikrotikAPI api {
+      hostname.c_str(),
+      config["username"].get<conf::string_t>().c_str(),
+      config["password"].get<conf::string_t>().c_str(), 8728
+   };
 
    Sentence sentence;
    Block block;
