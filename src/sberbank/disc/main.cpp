@@ -164,8 +164,8 @@ void run(const std::string &hostname, const std::string &community)
    // Waiting for discover data to be proccessed by Zabbix
    // then rebuilding screen.
    sleep(config["sleeptime"].get<conf::integer_t>());
-   build_screen(hotspots, hostname);
    remove(lockfile.c_str());
+   build_screen(hotspots, hostname);
 }
 
 int main(int argc, char *argv[])

@@ -114,34 +114,29 @@ buffer generate_screen_items(ordered_points &hotspots, unsigned *vsize)
                     "\"url\": \"%s\", \"width\": \"800\", \"x\": \"0\", \"y\": \"%u\"},",
                      data.nameurl.c_str(), y++);
 
-      if (0 == data.int_traffic_graphid or 0 == data.ext_traffic_graphid)
+      if (0 != data.ext_traffic_graphid)
       {
          items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
                        "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"0\", \"y\": \"%u\"},",
-                       0 != data.int_traffic_graphid ? data.int_traffic_graphid : data.ext_traffic_graphid, y++);
+                       data.ext_traffic_graphid, y);
 
          items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
                        "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"0\", \"y\": \"%u\"},",
-                       0 != data.int_users_graphid ? data.int_users_graphid : data.ext_users_graphid, y++);
-
-         continue;
+                       data.ext_users_graphid, y + 1);
       }
 
-      items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
-                    "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"1\", \"y\": \"%u\"},",
-                    data.int_traffic_graphid, y);
+      if (0 != data.int_traffic_graphid)
+      {
+         items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
+                       "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"1\", \"y\": \"%u\"},",
+                       data.int_traffic_graphid, y);
 
-      items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
-                    "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"0\", \"y\": \"%u\"},",
-                    data.ext_traffic_graphid, y++);
+         items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
+                       "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"1\", \"y\": \"%u\"},",
+                        data.int_users_graphid, y + 1);
+      }
 
-      items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
-                    "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"1\", \"y\": \"%u\"},",
-                    data.int_users_graphid, y);
-
-      items.append("{\"resourcetype\": \"0\", \"colspan\": \"1\", \"height\": \"100\","
-                    "\"resourceid\": \"%lu\" , \"width\": \"500\", \"x\": \"0\", \"y\": \"%u\"},",
-                    data.ext_users_graphid, y++);    
+      y += 2;
    }
 
    const addr_point_data &data = hotspots[totalname];
