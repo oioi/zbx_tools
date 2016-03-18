@@ -16,8 +16,8 @@
 
 namespace {
    const char *progname {"sba-disc"};
-   const char *conffile {"/etc/zabbix/sberbank/sba-disc.conf"};
-   const char *zbx_conffile {"/etc/zabbix/sberbank/zabbix-api.conf"};
+   const char *conffile {"/etc/zabbix/wifimon/sba-disc.conf"};
+   const char *zbx_conffile {"/etc/zabbix/wifimon/zabbix-api.conf"};
 
    conf::config_map db_section {
       { "host",     { conf::val_type::string } },
