@@ -132,6 +132,7 @@ void parse_internal(Block &block, device_data &dev)
       block[i].GetMap(words);
       if (0 == words.size()) continue;
 
+      if ("false" == words["complete"]) continue;
       const std::string &interface {words["interface"]};
       boost::sregex_iterator match {interface.begin(), interface.end(), vlan};
       if (rgx_end == match) continue;
