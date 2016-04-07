@@ -16,14 +16,18 @@ using int_points = std::unordered_map<std::string, unsigned long>;
 
 struct device_data
 {
+   unsigned hostid;
    std::string hostname;
    std::string ip;
 
    ext_points exts;
    int_points ints;
 
-   device_data(const std::string &hostname_, const std::string &ip_) : 
-      hostname {hostname_}, ip{ip_} { }
+   bool exts_total {false};
+   bool ints_total {false};
+
+   device_data(unsigned hostid_, const char *hostname_, const char *ip_) :
+      hostid {hostid_}, hostname {hostname_}, ip {ip_} { }
 };
 
 using devsdata = std::vector<device_data>;

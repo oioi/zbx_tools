@@ -1,5 +1,4 @@
 #include <boost/regex.hpp>
-#include <fstream>
 
 #include "aux_log.h"
 #include "prog_config.h"
@@ -26,81 +25,102 @@ conf::config_map config {
    { "password", { conf::val_type::string } },
 };
 
-devsdata read_devices(const std::string &filename)
+devsdata get_devices(zbx_api::api_session &zbx_sess)
 {
-   std::ifstream in {filename};
-   devsdata devices;
+   static const char *funcname {"get_devices"};
 
-   std::string hostname, ip;
-   while (in >> ip >> hostname)  devices.emplace_back(hostname, ip);
+   uint_t groupid = zbx_api::get_groupid_byname("hotspots", zbx_sess);
+   if (0 == groupid) throw logging::error {funcname, "Cannot obtain group ID for group 'hotspots'"};
+
+   zbx_sess.send_vstr(R"**(
+      "method": "host.get",
+      "params": {
+         "groupids": "%lu",
+         "output": [ "host" ],
+         "selectInterfaces": [ "ip" ] }
+   )**", groupid);
+
+   devsdata devices;
+   buffer hostname, ip, jsonpath;
+   uint_t hostid;
+
+   for (int i = 0; ; i++)
+   {
+      jsonpath.print("result[%d].hostid", i);
+      if (false == zbx_sess.json_get_uint(jsonpath.data(), &hostid)) break;
+
+      jsonpath.print("result[%d].host", i);
+      if (false == zbx_sess.json_get_str(jsonpath.data(), &hostname))
+         throw logging::error {funcname, "cannot obtai hostname for device with hostid: %lu", hostid};
+
+      jsonpath.print("result[%d].interfaces[0].ip", i);
+      if (false == zbx_sess.json_get_str(jsonpath.data(), &ip))
+         throw logging::error {funcname, "%s: cannot obtain IP from any interface.", hostname.data()};
+
+      devices.emplace_back(hostid, hostname.data(), ip.data());
+   }
 
    return devices;
 }
 
 void parse_items(zbx_api::api_session &zbx_sess, device_data &dev)
 {
-   buffer itemkey, jsonpath;
+   buffer jsonpath, itemkey;
+   std::string totalkey {"total"};
    std::string name;
 
-   boost::regex auth_clients {"^authorized\\[(\\d+)\\]$"};
-   boost::regex free_clients {"^users\\[(\\d+)\\]$"};
+   boost::regex auth_clients {"^authorized\\[(.*)\\]$"};
+   boost::regex free_clients {"^users\\[(.*)\\]$"};   
    boost::smatch match;
 
-   for (int i = 0; ; i++)
+   for (int i = 0; ;i++)
    {
       jsonpath.print("result[%d].key_", i);
       if (false == zbx_sess.json_get_str(jsonpath.data(), &itemkey)) break;
-
       name = itemkey.data();
-      if (boost::regex_match(name, match, auth_clients)) 
-         dev.exts.insert(std::make_pair(match[1], ext_point_data {}));
 
-      if (boost::regex_match(name, match, free_clients))
-         dev.ints.insert(std::make_pair(match[1], 0));
+      if (boost::regex_match(name, match, auth_clients)) 
+      {
+         if (totalkey == match[1]) dev.exts_total = true;
+         else dev.exts.insert(std::make_pair(match[1], ext_point_data {}));
+      }
+
+      if (boost::regex_match(name, match, free_clients)) 
+      {
+         if (totalkey == match[1]) dev.ints_total = true;
+         else dev.ints.insert(std::make_pair(match[1], 0)); 
+      }
    }
 }
 
-void get_poll_items(devsdata &devices)
+devsdata prepare_data()
 {
-   static const char *funcname {"get_poll_items"};
-
    zbx_api::api_session zbx_sess;
    zbx_sess.set_auth(zabbix["api-url"].get<conf::string_t>(),
                      zabbix["username"].get<conf::string_t>(),
                      zabbix["password"].get<conf::string_t>());
 
-   uint_t hostid;
+   devsdata devices {get_devices(zbx_sess)};
    for (auto &dev : devices)
    {
-      zbx_sess.send_vstr(R"**(
-         "method": "host.get",
-         "params": {
-            "output": "hostid",
-            "filter": { "host": "%s" } }
-      )**", dev.hostname.c_str());
-
-      if (false == zbx_sess.json_get_uint("result[0].hostid", &hostid))
-         throw logging::error {funcname, "Failed to obtain hostid for host: %s", dev.hostname.c_str()};
-
       zbx_sess.send_vstr(R"**(
          "method": "item.get",
          "params": {
             "hostids": "%lu",
             "output": [ "key_" ],
             "application": "Clients" }
-      )**", hostid);
+      )**", dev.hostid);
 
       parse_items(zbx_sess, dev);
    }
+
+   return devices;
 }
 
 void parse_external(Block &block, device_data &dev)
 {
    ext_points::iterator it;
    wordmap words;
-
-   boost::regex vlan {"\\d+"};
-   boost::sregex_iterator rgx_end;
 
    for (int i = 0; i < block.Length(); i++)
    {
@@ -109,12 +129,13 @@ void parse_external(Block &block, device_data &dev)
       if (0 == words.size()) continue;
 
       const std::string &server {words["server"]};
-      boost::sregex_iterator match {server.begin(), server.end(), vlan};
-      if (rgx_end == match) continue;
-
-      if (dev.exts.end() == (it = dev.exts.find(match->str()))) continue;
-      if ("true" == words["authorized"]) it->second.active++;
-      else it->second.inactive++;
+      for (auto &en : dev.exts)
+      {
+         if (std::string::npos == server.find(en.first)) continue;
+         if ("true" == words["authorized"]) en.second.active++;
+         else en.second.inactive++;
+         break;
+      }
    }
 }
 
@@ -122,9 +143,6 @@ void parse_internal(Block &block, device_data &dev)
 {
    int_points::iterator it;
    wordmap words;
-
-   boost::regex vlan {"\\d+"};
-   boost::sregex_iterator rgx_end;
 
    for (int i = 0; i < block.Length(); i++)
    {
@@ -134,11 +152,13 @@ void parse_internal(Block &block, device_data &dev)
 
       if ("false" == words["complete"]) continue;
       const std::string &interface {words["interface"]};
-      boost::sregex_iterator match {interface.begin(), interface.end(), vlan};
-      if (rgx_end == match) continue;
 
-      if (dev.ints.end() == (it = dev.ints.find(match->str()))) continue;
-      it->second++;
+      for (auto &en : dev.ints)
+      {
+         if (std::string::npos == interface.find(en.first)) continue;
+         en.second++;
+         break;
+      }
    }
 }
 
@@ -170,21 +190,23 @@ void poll_devices(devsdata &devices)
          api.WriteSentence(sentence);
          api.ReadBlock(block);
          parse_internal(block, dev);
-      }
+      }      
    }
 }
 
-void send_to_zabbix(devsdata &devices)
+void send_to_zabbix(const devsdata &devices)
 {
    static const char *funcname {"send_to_zabbix"};
 
    zbx_sender zbxs;   
    std::string key;
-   unsigned total_inactive {}, total_active {};
+   unsigned total_inactive, total_active;
 
-   for (const auto &dev : devices)
+   for (auto &dev : devices)
    {
-      for (const auto &en : dev.exts)
+      total_inactive = total_active = 0;
+
+      for (auto &en : dev.exts)
       {
          key = "authorized[";
          key += en.first + ']';
@@ -197,13 +219,16 @@ void send_to_zabbix(devsdata &devices)
          total_inactive += en.second.inactive;
       }
 
-      key = "authorized[total]";
-      zbxs.add_data(dev.hostname, key, total_active);
-      key = "unauthorized[total]";
-      zbxs.add_data(dev.hostname, key, total_inactive);
+      if (dev.exts_total)
+      {
+         key = "authorized[total]";
+         zbxs.add_data(dev.hostname, key, total_active);
+         key = "unauthorized[total]";
+         zbxs.add_data(dev.hostname, key, total_inactive);
+      }
 
       total_active = 0;
-      for (const auto &en : dev.ints)
+      for (auto &en : dev.ints)
       {
          key = "users[";
          key += en.first + ']';
@@ -211,8 +236,11 @@ void send_to_zabbix(devsdata &devices)
          total_active += en.second;
       }
 
-      key = "users[total]";
-      zbxs.add_data(dev.hostname, key, total_active);
+      if (dev.ints_total)
+      {
+         key = "users[total]";
+         zbxs.add_data(dev.hostname, key, total_active);
+      }
    }
 
    sender_response result {zbxs.send()};
@@ -220,11 +248,9 @@ void send_to_zabbix(devsdata &devices)
          result.processed, result.failed, result.total, result.elapsed);   
 }
 
-
-int main(int argc, char *argv[])
+int main(void)
 {
    openlog(progname, LOG_PID, LOG_LOCAL7);
-   if (2 != argc) logger.error_exit(progname, "Wrong argumnets. Should be: %s [input_file]", argv[0]);
 
    try {
       if (0 == conf::read_config(conffile, config))
@@ -233,14 +259,13 @@ int main(int argc, char *argv[])
       if (0 == conf::read_config(zbx_conffile, zabbix))
          logger.error_exit(progname, "Errors while reading zabbix configuration file.");
 
-      devsdata devices {read_devices(std::string {argv[1]})};
-      get_poll_items(devices);
+      devsdata devices {prepare_data()};
       poll_devices(devices);
       send_to_zabbix(devices);
    }
 
-   catch (std::exception &e) {
-      logger.error_exit(progname, e.what());
+   catch (std::exception &exc) {
+      logger.error_exit(progname, exc.what());
    }
 
    catch (...) {
