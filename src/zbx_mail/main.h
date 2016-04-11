@@ -20,5 +20,6 @@ struct regexes
 
 void insert_graphid_img(std::string &arg, std::string &line);
 void insert_itemgraph_img(std::string &arg, std::string &line);
+void replace_peername(std::string &arg, std::string &line);
 
 #endif

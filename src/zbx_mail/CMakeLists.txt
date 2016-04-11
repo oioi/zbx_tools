@@ -9,10 +9,12 @@ target_link_libraries(zbx_mail
                       liblog.a 
                       libbasic_curl.a 
                       libzbxapi.a 
-                      libfrozen.a 
+                      libfrozen.a
+                      libbasic_mysql.a
 
 		      curl
 		      confuse
 		      boost_regex
+                      mysqlclient
 	              ssl
 )
