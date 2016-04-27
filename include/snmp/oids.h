@@ -6,6 +6,9 @@
 namespace snmp {
    namespace oids {
 
+      extern const size_t tticks_size;
+      extern const oid tticks[];
+
       extern const size_t objid_size;
       extern const oid objid[];
 
@@ -23,6 +26,9 @@ namespace snmp {
 
       extern const size_t ifhighspeed_size;
       extern const oid ifhighspeed[];
+
+      extern const size_t ifbroadcast_size;
+      extern const oid ifbroadcast[];
    }
 }
 

@@ -2,6 +2,9 @@
 
 namespace snmp {
    namespace oids {
+      const size_t tticks_size = 9;
+      const oid tticks[] = { 1, 3, 6, 1, 2, 1, 1, 3, 0 };
+
       const size_t objid_size = 9;
       const oid objid[] = { 1, 3, 6, 1, 2, 1, 1, 2, 0 };
 
@@ -18,6 +21,9 @@ namespace snmp {
       const oid ifalias[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 18, 0 };
 
       const size_t ifhighspeed_size = 12;
-      const oid ifhighspeed[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 15, 0 };        
+      const oid ifhighspeed[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 15, 0 };
+
+      const size_t ifbroadcast_size = 12;
+      const oid ifbroadcast[] = { 1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 9, 0 };
    }
 }

@@ -63,6 +63,12 @@ struct sess_handle
    void close() { if (nullptr != ptr) { snmp_sess_close(ptr); ptr = nullptr; } }
    ~sess_handle() { close(); }
 
+   sess_handle(const sess_handle &other) = delete;
+   sess_handle(sess_handle &&other) : ptr{other.ptr} { other.ptr = nullptr; }
+
+   sess_handle & operator =(const sess_handle &other) = delete;
+   sess_handle & operator =(sess_handle &&other) { ptr = other.ptr; other.ptr = nullptr; return *this; }
+
    operator void *() { return ptr; }
    sess_handle & operator =(void *ptr_)
    {
@@ -79,6 +85,12 @@ struct pdu_handle
    pdu_handle(netsnmp_pdu *pdu_ = nullptr) : pdu{pdu_} { }
    void free() { if (nullptr != pdu) { snmp_free_pdu(pdu); pdu = nullptr; } }
    ~pdu_handle() { free(); }
+
+   pdu_handle(const pdu_handle &other) { pdu = snmp_clone_pdu(other.pdu); }
+   pdu_handle(pdu_handle &&other) : pdu{other.pdu} { other.pdu = nullptr; }
+
+   pdu_handle & operator =(const pdu_handle &other) { pdu = snmp_clone_pdu(other.pdu); return *this; }
+   pdu_handle & operator =(pdu_handle &&other) { pdu = other.pdu; other.pdu = nullptr; return *this; }
 
    operator netsnmp_pdu *() { return pdu; }
    pdu_handle & operator =(netsnmp_pdu *pdu_)
@@ -102,6 +114,7 @@ class oid_handle
 
       operator oid *() { return data; };
       oid & operator [](unsigned i) { return data[i]; }
+      size_t length() const { return size; }
 
    private:
       oid *data;
