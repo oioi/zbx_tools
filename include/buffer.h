@@ -27,6 +27,7 @@ class buffer
 
       const char *data() const { return data_.get(); }
       char *mem() { return data_.get(); }
+      char *clone();
 
       size_type size() const { return size_; }
       size_type capacity() const { return capacity_; }

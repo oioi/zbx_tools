@@ -100,3 +100,12 @@ void buffer::setmem(char *memory, size_type capacity, size_type size)
    capacity_ = capacity;
    data_.reset(memory);
 }
+
+char * buffer::clone()
+{
+   if (0 == size_) return nullptr;
+   char *ptr = new char[size_ + 1];
+   memcpy(ptr, data_.get(), size_);
+   ptr[size_] = '\0';
+   return ptr;
+}
