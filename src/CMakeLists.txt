@@ -1,5 +1,5 @@
 add_subdirectory(libs)
-add_subdirectory(llid)
+add_subdirectory(discoverers)
 add_subdirectory(loopd)
 add_subdirectory(zbx_cfm)
 add_subdirectory(zbx_dd)
