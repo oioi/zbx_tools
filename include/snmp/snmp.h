@@ -1,6 +1,7 @@
 #ifndef SNMPLIB_H
 #define SNMPLIB_H
 
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -103,39 +104,39 @@ struct pdu_handle
 class oid_handle
 {
    public:
-      oid_handle(const oid *source, size_t size_) : size{0} { copy(source, size_); }
-      ~oid_handle() { delete [] data; }
+      oid_handle(const std::initializer_list<oid> &source) : size_ {source.size()} 
+      {
+         data_.reset(new oid[size_]);
+         oid *ptr = data_.get();
+         for (auto &it : source) { *ptr++ = it; }
+      }
 
-      oid_handle(const oid_handle &other) : size{0} { copy(other.data, other.size); }
-      oid_handle(oid_handle &&other) : size{0} { move(other); }
+      oid_handle(const oid *source, size_t size) { copy(source, size); }
+      oid_handle(oid_handle &&other) { move(other); }
 
-      oid_handle & operator =(const oid_handle &other) { copy(other.data, other.size); return *this; }
+      oid_handle & operator =(const oid_handle &other) { copy(other.data_.get(), other.size_); return *this; }
       oid_handle & operator =(oid_handle &&other) { move(other); return *this; }
 
-      operator oid *() { return data; };
-      oid & operator [](unsigned i) { return data[i]; }
-      size_t length() const { return size; }
+      operator oid *() { return data_.get(); };
+      oid & operator [](unsigned i) { return data_[i]; }
+      size_t size() const { return size_; }
 
    private:
-      oid *data;
-      size_t size;
+      size_t size_;
+      std::unique_ptr<oid []> data_;
 
-      void copy(const oid *source, size_t size_)
+      void copy(const oid *source, size_t size)
       {
-         if (0 != size) delete [] data;
-         size = size_;
-         data = new oid[size];
-         memcpy(data, source, size * sizeof(oid));
+         size_ = size;
+         data_.reset(new oid[size]);
+         memcpy(data_.get(), source, size);
       }
 
       void move(oid_handle &other)
       {
-         if (0 != size) delete [] data;
-         size = other.size;
-         data = other.data;
-
-         other.data = nullptr;
-         other.size = 0;
+         size_ = other.size_;
+         data_ = std::move(other.data_);
+         other.size_ = 0;
       }
 };
 
