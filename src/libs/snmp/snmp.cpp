@@ -114,20 +114,26 @@ void async_send(void *sessp, netsnmp_pdu *request)
    }
 }
 
-std::string print_objid(netsnmp_variable_list *var)
+std::string print_oid(const oid *oid, size_t oidsize)
 {
-   static const char *funcname {"snmp::print_objid"};
-   static const int bufsize = 128;
-   static char buffer[bufsize];
+   static const char *funcname {"snmp::print_oid"};
+   const int bufsize = 128;
+   char buffer[bufsize];
 
-   if (ASN_OBJECT_ID != var->type)
-      throw snmprun_error {errtype::invalid_data, funcname, "host returned unexpected ASN type in answer to objid"};
-
-   int len = snprint_objid(buffer, bufsize, var->val.objid, var->val_len / sizeof(oid));
+   int len = snprint_objid(buffer, bufsize, oid, oidsize);
    if (-1 == len) throw snmprun_error {errtype::runtime, funcname, "snprint_objid failed. buffer is not large enough?"};
    buffer[len] = '\0';
 
-   return std::string {buffer};
+   return std::string {buffer};   
+}
+
+std::string print_objid(netsnmp_variable_list *var)
+{
+   static const char *funcname {"snmp::print_objid"};
+
+   if (ASN_OBJECT_ID != var->type)
+      throw snmprun_error {errtype::invalid_data, funcname, "host returned unexpected ASN type in answer to objid"};
+   return print_oid(var->val.objid, var->val_len / sizeof(oid));
 }
 
 std::string get_host_objid(void *sessp)
@@ -137,6 +143,42 @@ std::string get_host_objid(void *sessp)
    return print_objid(response.pdu->variables);
 }
 
+std::vector<unsigned> get_nodes_bytype(void *sessp, const oid *oidst, size_t oidsize, const std::vector<unsigned> &match)
+{
+   static const char *funcname {"snmp::get_nodes_bytype"};
+
+   const oid *cur_oid = oidst;
+   size_t cur_size = oidsize;
+
+   std::vector<unsigned> data;
+   pdu_handle response;
+
+   for (netsnmp_variable_list *vars;;)
+   {
+      response = synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK);
+      for (vars = response.pdu->variables; nullptr != vars; vars = vars->next_variable)
+      {
+         if (netsnmp_oid_is_subtree(oidst, oidsize, vars->name, vars->name_length))
+            return data;
+
+         if (ASN_INTEGER != vars->type) {
+            throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in asnwer to OID: %s",
+               print_oid(cur_oid, cur_size).c_str()};
+         }
+
+         for (auto it : match) {
+            if (it == *(vars->val.integer)) data.push_back(*(vars->name + oidsize)); }
+
+         if (nullptr == vars->next_variable)
+         {
+            cur_oid = vars->name;
+            cur_size = vars->name_length;
+         }
+      }
+   }
+}
+
+/*
 intdata get_host_physints(void *sessp)
 {
    static const char *funcname {"snmp::get_host_physints"};
@@ -167,7 +209,7 @@ intdata get_host_physints(void *sessp)
          }
       }
    }
-}
+} */
 
 int_info_st parse_intinfo(netsnmp_variable_list *vars, unsigned id)
 {

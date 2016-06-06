@@ -26,39 +26,6 @@ void escape_string(std::string &source)
       source.replace(pos, sizeof(char), "\\\"");
 }
 
-std::vector<unsigned> get_temp_sensors(void *sessp)
-{
-   static const char *funcname {"get_temp_sensors"};
-
-   const oid sensors[] { 1, 3, 6, 1, 4, 1, 9, 9, 91, 1, 1, 1, 1, 1 };
-   const size_t sensors_size = sizeof(sensors) / sizeof(oid);
-   const oid *oidst = sensors;
-   size_t oidsize = sensors_size;
-
-   std::vector<unsigned> temp_sensors;
-   snmp::pdu_handle response;
-
-   for (netsnmp_variable_list *vars;;)
-   {
-      response = snmp::synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK);
-      for (vars = response.pdu->variables; nullptr != vars; vars = vars->next_variable)
-      {
-         if (netsnmp_oid_is_subtree(sensors, sensors_size, vars->name, vars->name_length))
-            return temp_sensors;
-
-         if (ASN_INTEGER != vars->type)
-            throw snmp::snmprun_error {snmp::errtype::invalid_data, funcname, "Unexpected ASN type in asnwer to sensors type."};
-         if (8 == *(vars->val.integer)) temp_sensors.push_back(*(vars->name + 14));
-
-         if (nullptr == vars->next_variable)
-         {
-            oidst = vars->name;
-            oidsize = vars->name_length;
-         }
-      }
-   }
-}
-
 sensor_info_st parse_info(netsnmp_variable_list *vars, unsigned id)
 {
    static const char *funcname {"parse_info"};
@@ -130,8 +97,13 @@ sensors_data get_sensors_info(void *sessp, const std::vector<unsigned> &sensors)
 
 buffer get_host_tempsensors(const char *host, const char *community)
 {
-   snmp::sess_handle sessp {snmp::init_snmp_session(host, community)};
-   std::vector<unsigned> temp_sensors {get_temp_sensors(sessp)};
+   const oid sensors[] { 1, 3, 6, 1, 4, 1, 9, 9, 91, 1, 1, 1, 1, 1 };
+   const size_t sensors_size = sizeof(sensors) / sizeof(oid);
+
+   snmp::sess_handle sessp {snmp::init_snmp_session(host, community)};   
+
+   // 8 - temperature sensor type
+   std::vector<unsigned> temp_sensors {get_nodes_bytype(sessp, sensors, sensors_size, { 8 })}; 
    sensors_data sensors_info {get_sensors_info(sessp, temp_sensors)};
 
    buffer json;
@@ -141,8 +113,8 @@ buffer get_host_tempsensors(const char *host, const char *community)
    {
       escape_string(entry.name);
       json.append("{\"{#INDEX}\":\"%u\","
-                  "\"{#SCALE}\":\"%f\","
-                  "\"{#NAME}\":\"%s\"},",
+                   "\"{#SCALE}\":\"%f\","
+                   "\"{#NAME}\":\"%s\"},",
                    entry.id, entry.scale, entry.name.c_str());
    }
 

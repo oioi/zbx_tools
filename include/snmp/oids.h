@@ -1,7 +1,8 @@
 #ifndef SNMPLIB_OIDS_H
 #define SNMPLIB_OIDS_H
 
-#include "snmp/snmp.h"
+#include <net-snmp/net-snmp-config.h>
+#include <net-snmp/net-snmp-includes.h>
 
 namespace snmp {
    namespace oids {

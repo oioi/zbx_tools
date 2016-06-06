@@ -9,6 +9,7 @@
 #include <net-snmp/net-snmp-includes.h>
 
 #include "aux_log.h"
+#include "snmp/oids.h"
 
 namespace snmp {
 
@@ -129,7 +130,7 @@ class oid_handle
       {
          size_ = size;
          data_.reset(new oid[size]);
-         memcpy(data_.get(), source, size);
+         memcpy(data_.get(), source, size * sizeof(oid));
       }
 
       void move(oid_handle &other)
@@ -157,8 +158,11 @@ std::string print_objid(netsnmp_variable_list *var);
 
 std::string get_host_objid(void *sessp);
 
+std::vector<unsigned> get_nodes_bytype(void *sessp, const oid *oidst, size_t oidsize, const std::vector<unsigned> &match);
+
 using intdata = std::vector<unsigned>;
-intdata get_host_physints(void *sessp);
+inline intdata get_host_physints(void *sessp) {
+   return get_nodes_bytype(sessp, oids::iftype, oids::iftype_size - 1, { ethernetCsmacd, gigabitEthernet }); }
 
 struct int_info_st
 {
