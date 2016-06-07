@@ -155,7 +155,7 @@ std::vector<unsigned> get_nodes_bytype(void *sessp, const oid *oidst, size_t oid
 
    for (netsnmp_variable_list *vars;;)
    {
-      response = synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK);
+      response = synch_request(sessp, cur_oid, cur_size, SNMP_MSG_GETBULK);
       for (vars = response.pdu->variables; nullptr != vars; vars = vars->next_variable)
       {
          if (netsnmp_oid_is_subtree(oidst, oidsize, vars->name, vars->name_length))
@@ -177,39 +177,6 @@ std::vector<unsigned> get_nodes_bytype(void *sessp, const oid *oidst, size_t oid
       }
    }
 }
-
-/*
-intdata get_host_physints(void *sessp)
-{
-   static const char *funcname {"snmp::get_host_physints"};
-
-   const oid *oidst = oids::iftype;
-   size_t oidsize = oids::iftype_size - 1;
-
-   intdata ints;
-   pdu_handle response;
-
-   for (netsnmp_variable_list *vars;;)
-   {
-      response = synch_request(sessp, oidst, oidsize, SNMP_MSG_GETBULK);
-      for (vars = response.pdu->variables; nullptr != vars; vars = vars->next_variable)
-      {
-         if (netsnmp_oid_is_subtree(oids::iftype, oids::iftype_size - 1, vars->name, vars->name_length))
-            return ints;
-
-         if (ASN_INTEGER != vars->type)
-            throw snmprun_error {errtype::invalid_data, funcname, "unexpected ASN type in asnwer to iftype"};
-         if (ethernetCsmacd == *(vars->val.integer) or gigabitEthernet == *(vars->val.integer))
-            ints.push_back(*(vars->name + 10));
-
-         if (nullptr == vars->next_variable)
-         {
-            oidst = vars->name;
-            oidsize = vars->name_length;
-         }
-      }
-   }
-} */
 
 int_info_st parse_intinfo(netsnmp_variable_list *vars, unsigned id)
 {
