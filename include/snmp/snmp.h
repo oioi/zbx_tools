@@ -156,6 +156,8 @@ std::string print_objid(netsnmp_variable_list *var);
 
 // Specific, but used from time to time
 
+std::string print_oid(const oid *oid, size_t oidsize);
+std::string print_objid(netsnmp_variable_list *var);
 std::string get_host_objid(void *sessp);
 
 std::vector<unsigned> get_nodes_bytype(void *sessp, const oid *oidst, size_t oidsize, const std::vector<unsigned> &match);
