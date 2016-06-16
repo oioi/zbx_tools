@@ -40,6 +40,10 @@ sensor_info_st parse_info(netsnmp_variable_list *vars, unsigned id)
             if (ASN_OCTET_STR != vars->type)
                throw snmp::snmprun_error {snmp::errtype::invalid_data, funcname, "Unexpected ASN type in answer for name"};
             info.name.append(reinterpret_cast<char *>(vars->val.string), vars->val_len);
+
+            // New crutches. Suddenly we don't want to know temperature from SFP modules.
+            // Theoretically zero index shouldn't exist.
+            if (std::string::npos != info.name.find("thernet")) { info.id = 0; return info; }
             break;
 
          case 1:
@@ -89,6 +93,9 @@ sensors_data get_sensors_info(void *sessp, const std::vector<unsigned> &sensors)
       snmp_add_null_var(request, sensor_precision, precisionsize);
 
       response = snmp::synch_request(sessp, request);
+      sensor_info_st info {parse_info(response.pdu->variables, id)};
+
+      if (0 == info.id) continue;
       sensors_info.push_back(parse_info(response.pdu->variables, id));
    }
 
@@ -103,7 +110,7 @@ buffer get_host_tempsensors(const char *host, const char *community)
    snmp::sess_handle sessp {snmp::init_snmp_session(host, community)};   
 
    // 8 - temperature sensor type
-   std::vector<unsigned> temp_sensors {get_nodes_bytype(sessp, sensors, sensors_size, { 8 })}; 
+   std::vector<unsigned> temp_sensors {snmp::get_nodes_bytype(sessp, sensors, sensors_size, { 8 })}; 
    sensors_data sensors_info {get_sensors_info(sessp, temp_sensors)};
 
    buffer json;
