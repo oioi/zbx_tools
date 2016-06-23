@@ -96,7 +96,7 @@ sensors_data get_sensors_info(void *sessp, const std::vector<unsigned> &sensors)
       sensor_info_st info {parse_info(response.pdu->variables, id)};
 
       if (0 == info.id) continue;
-      sensors_info.push_back(parse_info(response.pdu->variables, id));
+      sensors_info.push_back(std::move(info));
    }
 
    return sensors_info;
