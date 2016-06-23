@@ -21,22 +21,22 @@ namespace {
    };
 
    conf::config_map poller_section {
-      { "update_interval",  { conf::val_type::integer } },
-      { "poll_interval",    { conf::val_type::integer } },
-      { "recheck_interval", { conf::val_type::integer } },
+      { "update-interval",  { conf::val_type::integer } },
+      { "poll-interval",    { conf::val_type::integer } },
+      { "recheck-interval", { conf::val_type::integer } },
 
-      { "mavsize",         { conf::val_type::integer } },
-      { "bcmax",           { conf::val_type::integer } },
-      { "mavmax",          { conf::val_type::integer } },
-      { "recover_ratio",   { conf::val_type::integer } }
+      { "bcmax",         { conf::val_type::integer } },
+      { "mavlow",        { conf::val_type::integer } },
+      { "mavmax",        { conf::val_type::integer } },
+      { "recover-ratio", { conf::val_type::integer } }
    };
 
    conf::config_map notif_section {
-      { "image-width" ,  { conf::val_type::integer } },
-      { "image-height",  { conf::val_type::integer } },
-      { "from",          { conf::val_type::string  } },
-      { "rcpts",         { conf::val_type::multistring } },
-      { "smtphost",      { conf::val_type::string } }
+      { "image-width" , { conf::val_type::integer } },
+      { "image-height", { conf::val_type::integer } },
+      { "from",         { conf::val_type::string  } },
+      { "rcpts",        { conf::val_type::multistring } },
+      { "smtphost",     { conf::val_type::string } }
    };
 
    conf::config_map snmp_section {
@@ -57,7 +57,7 @@ conf::config_map config {
 };
 
 devsdata devices;
-devtasks action_data, action_queue;
+devtasks action_data, action_queue, return_data;
 inttasks alarm_data, alarm_queue;
 
 snmp::mux_poller poller;
@@ -116,17 +116,6 @@ void transfer_data(devsdata &maind, devsdata &repld)
    }   
 }
 
-void rebuild_poller()
-{
-   poller.clear();
-   for (auto &device : devices)
-   {
-      if (hoststate::enabled != device.second.state) continue;
-      poller.add(device.first.c_str(), device.second.community.c_str(),
-            device.second.generic_req, callback, static_cast<void *>(&(device.second)));
-   }
-}
-
 void prepare_data(devsdata &maind, devsdata &newd, std::thread &worker_thread)
 {
    // Waiting for worker thread to finish his current jobs and exit. Worker should complete all his alarm
@@ -144,13 +133,15 @@ void prepare_data(devsdata &maind, devsdata &newd, std::thread &worker_thread)
 
    transfer_data(maind, newd);
    action_data.clear();
+   poller.clear();
 
-   for (auto &device : maind) {
-      if (hoststate::enabled != device.second.state) 
-         action_data.push_back(&(device.second));
+   for (auto &device : devices)
+   {
+      if (hoststate::enabled != device.second.state) action_data.push_back(&(device.second));
+      else poller.add(device.first.c_str(), device.second.community.c_str(),
+               device.second.generic_req, callback, static_cast<void *>(&(device.second)));
    }
 
-   rebuild_poller();
    syncdata.running = true;
    worker_thread = std::thread{worker, &syncdata};
 }
@@ -181,8 +172,8 @@ void mainloop()
    // So we're assuming that devices update interval should be measured in hours and
    // actual polling interval is measured in seconds (which better be at least a minute). 
    // No checks for unhealthy values, like zeroes or negatives.
-   const std::chrono::hours update_interval {config["poller"]["update_interval"].get<conf::integer_t>()};
-   const std::chrono::seconds poll_interval {config["poller"]["poll_interval"].get<conf::integer_t>()};
+   const std::chrono::hours update_interval {config["poller"]["update-interval"].get<conf::integer_t>()};
+   const std::chrono::seconds poll_interval {config["poller"]["poll-interval"].get<conf::integer_t>()};
 
    std::thread worker_thread;
 
@@ -192,14 +183,17 @@ void mainloop()
    devsdata *newdata {};
 
    steady_clock::time_point begin, last_update {steady_clock::now()};
+   std::unique_lock<std::mutex> datalock {syncdata.device_datalock, std::defer_lock};
    std::chrono::hours since_update;
 
    for (;;)
    {
       begin = steady_clock::now();
+      datalock.lock();
       poller.poll();
+      datalock.unlock();
 
-      if (update_started and !updating)
+      if (update_started and not updating)
       {
          logger.log_message(LOG_INFO, funcname, "device update finished. swapping data %lu -> %lu",
                newdata->size(), devices.size());
@@ -210,19 +204,33 @@ void mainloop()
       }
 
       since_update = std::chrono::duration_cast<std::chrono::hours>(begin - last_update);      
-      if (0 == devices.size() or update_interval <= since_update)
+      if (not updating and (devices.empty() or update_interval <= since_update))
       {
-         std::lock_guard<std::mutex> lock {syncdata.device_datalock};
+         datalock.lock();
          update_started = updating = true;
          newdata = new devsdata(devices);
+         datalock.unlock();
 
-         std::thread {update_devices, newdata, &updating}.detach();
+         std::thread {update_devices, newdata, std::ref(updating)}.detach();
          last_update = steady_clock::now();
       }
 
-      // NOTE: Check updates from worker thread.
+      // Checking updates from worker thread.
+      syncdata.updatelock.lock();
+      if (syncdata.data_updated) 
+      {
+         for (auto it : return_data)
+            poller.add(it->host.c_str(), it->community.c_str(),
+                  it->generic_req, callback, static_cast<void *>(it));
 
-      if (0 != action_queue.size() or 0 != alarm_queue.size()) add_jobs();
+         syncdata.data_updated = false;
+         return_data.clear();
+      }
+      syncdata.updatelock.unlock();
+
+      if (!action_queue.empty() or !alarm_queue.empty()) add_jobs();
+      logger.log_message(LOG_INFO, funcname, "sleeping for %lds", 
+            (poll_interval - std::chrono::duration_cast<std::chrono::seconds>(steady_clock::now() - begin)).count());
       std::this_thread::sleep_for(poll_interval - std::chrono::duration_cast<std::chrono::seconds>(steady_clock::now() - begin));
    }
 }
@@ -242,8 +250,8 @@ int main()
       mainloop();
    }
 
-   catch (logging::error &error) {
-      logger.error_exit(progname, error.what());
+   catch (std::exception &exc) {
+      logger.error_exit(progname, exc.what());
    }
 
    catch (...) {

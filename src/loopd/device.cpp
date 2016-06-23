@@ -29,7 +29,7 @@ void create_device(devsdata &devices, const std::string &host, const std::string
    static const conf::string_t &defcom {config["snmp"]["default-community"].get<conf::string_t>()};
    static const conf::string_t &datadir {config["datadir"].get<conf::string_t>()};
 
-   if (0 == community.size()) community = defcom;
+   if (community.empty()) community = defcom;
    devsdata::iterator it = devices.find(host);
 
    if (devices.end() != it)
@@ -45,10 +45,12 @@ void create_device(devsdata &devices, const std::string &host, const std::string
    }
 
    std::string devdir {datadir + '/' + host};
-   // NOTE: Manage with the sutuation, when directory already exists? Handle EEXIST?
    if (-1 == mkdir(devdir.c_str(), S_IRWXU))
-      throw logging::error {funcname, "failed to create device data directory '%s': %s",
-         devdir.c_str(), strerror(errno)};
+   {
+      // NOTE: Should we check directory permissions?
+      if (EEXIST != errno) throw logging::error {funcname, "failed to create device data directory '%s': %s",
+           devdir.c_str(), strerror(errno)};
+   }
 
    logger.log_message(LOG_INFO, funcname, "Added new device %s: '%s' - %s",
          host.c_str(), name.c_str(), community.c_str());
@@ -64,16 +66,24 @@ void parse_zbxdata(devsdata &devices, zbx_api::api_session &zbx_sess)
 
    for (int i = 0; ;i++)
    {
-      jsonpath.print("result[%d].host", i);
-      if (false == zbx_sess.json_get_str(jsonpath.data(), &result)) break;
-      host = result.data();
-
       jsonpath.print("result[%d].name", i);
-      if (false == zbx_sess.json_get_str(jsonpath.data(), &result))
-         throw logging::error {funcname, "%s: failed to get device name", host.c_str()};
+      if (false == zbx_sess.json_get_str(jsonpath.data(), &result)) break;
 
       name = convertwc(zbx_api::parse_codestring(std::string {result.data()}));
       community.clear();
+
+      for (unsigned long type, j = 0; ;j++)
+      {
+         jsonpath.print("result[%d].interfaces[%lu].type", i, j);
+         if (false == zbx_sess.json_get_uint(jsonpath.data(), &type)) break;
+         if (2 != type) continue;
+
+         jsonpath.print("result[%d].interfaces[%lu].ip", i, j);
+         if (false == zbx_sess.json_get_str(jsonpath.data(), &result))
+            throw logging::error {funcname, "%s: failed to get interface IP address.", name.c_str()};
+         host = result.data();
+         break;
+      }
 
       for (int j = 0; ;j++)
       {
@@ -83,7 +93,7 @@ void parse_zbxdata(devsdata &devices, zbx_api::api_session &zbx_sess)
 
          jsonpath.print("result[%d].macros[%d].value", i, j);
          if (false == zbx_sess.json_get_str(jsonpath.data(), &result))
-            throw logging::error {funcname, "%s: failed to get macro's value.", host.c_str()};
+            throw logging::error {funcname, "%s: failed to get macro's value.", name.c_str()};
 
          community = result.data();
          break;
@@ -112,8 +122,9 @@ void init_device(device &devdata)
    {
       if (devdata.community == defcom)
       {
+         if (snmp::errtype::timeout != error.type) throw;
          logger.log_message(LOG_INFO, funcname, "%s: device init failed: %s", host, error.what());
-         devdata.state = hoststate::disabled;
+         devdata.state = hoststate::unreachable;
          return;
       } 
 
@@ -122,21 +133,23 @@ void init_device(device &devdata)
          logger.log_message(LOG_INFO, funcname, "%s: retrying device with default SNMP community.", host);
          sessp = snmp::init_snmp_session(host, defcom.c_str());
          objid = snmp::get_host_objid(sessp);
+         devdata.community = defcom;
       }
 
       catch (snmp::snmprun_error &error)
       {
+         if (snmp::errtype::timeout != error.type) throw;
          logger.log_message(LOG_INFO, funcname, "%s: device is not responding with any of known communities.", host);
-         devdata.state = hoststate::disabled;
+         devdata.state = hoststate::unreachable;
          return;
       }
    }
 
-   if (0 != devdata.objid.size() and objid != devdata.objid)
+   if (!devdata.objid.empty() and objid != devdata.objid)
    {
       logger.log_message(LOG_INFO, funcname, "%s: device type has changed from %s to %s",
             host, devdata.objid.c_str(), objid.c_str());
-      // NOTE: Should we clear interfaces?
+      devdata.ints.clear();
    }
 
    devdata.objid = objid;
@@ -147,7 +160,7 @@ void init_device(device &devdata)
 void update_ints(device &devdata)
 {
    static const char *funcname {"update_ints"};
-   static const conf::integer_t seconds {config["poller"]["poll_interval"].get<conf::integer_t>()};
+   static const conf::integer_t seconds {config["poller"]["poll-interval"].get<conf::integer_t>()};
    snmp::intinfo info;
 
    try
@@ -159,6 +172,7 @@ void update_ints(device &devdata)
 
    catch (snmp::snmprun_error &error)
    {
+      if (snmp::errtype::timeout != error.type) throw;
       logger.log_message(LOG_WARNING, funcname, "%s: device's interfaces update failed: %s",
             devdata.host.c_str(), error.what());
       devdata.state = hoststate::unreachable;
@@ -176,7 +190,7 @@ void update_ints(device &devdata)
       it.alias = inti.alias;
       it.delmark = false;
 
-      if (0 != it.name.size())
+      if (!it.name.empty())
       {
          logger.log_message(LOG_INFO, funcname, "%s: updated interface %u: %s - %s",
                devdata.host.c_str(), inti.id, inti.name.c_str(), inti.alias.c_str());
@@ -213,10 +227,11 @@ void update_devdata(devsdata *devices)
          "method": "host.get",
          "params": {
             "groupids": "%lu",
-            "output": [ "host", "name" ],
-            "selectMacros": [ "macro", "value" ] }
+            "output": [ "name" ],
+            "selectMacros": [ "macro", "value" ],
+            "selectInterfaces": [ "ip", "type" ] }
       )**", groupid);
-      parse_zbxdata(*devices, zbx_sess);       
+      parse_zbxdata(*devices, zbx_sess);  
    }
 
    unsigned delmark {}, inactive {};
@@ -231,25 +246,25 @@ void update_devdata(devsdata *devices)
    // So we have updated datamap of devices with corresponding interfaces. Devices which were not received again from zabbix are
    // marked to be deleted. Same thing with interfaces. Since updating is performed in a separate thread, we're not
    // actually releasing any resources from here. Main thread will be signaled that data is updated. It will check any
-   // resourced marked for deletion and release them appropriately. All new devices and interfaces are already initialized.   
+   // resources marked for deletion and release them appropriately. All new devices and interfaces are already initialized.
    std::chrono::duration<double> elapsed {std::chrono::steady_clock::now() - start};
    logger.log_message(LOG_INFO, funcname, "Updated devices in %fs. Total: %lu. Inactive: %u. Marked for deletion: %u",
          elapsed.count(), devices->size(), inactive, delmark);   
 }
 
-void update_devices(devsdata *devices, std::atomic<bool> *updating)
+void update_devices(devsdata *devices, std::atomic<bool> &updating)
 {
    static const char *funcname {"update_devices"};
 
    try { update_devdata(devices); }
 
-   catch (logging::error &error) {
-      logger.error_exit(funcname, "Exception thrown in updater thread: %s", error.what());
+   catch (std::exception &exc) {
+      logger.error_exit(funcname, "Exception thrown in updater thread: %s", exc.what());
    }
 
    catch (...) {
       logger.error_exit(funcname, "Updater thread aborted by generic catch clause.");
    }
 
-   *updating = false;
+   updating = false;
 }

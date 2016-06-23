@@ -14,6 +14,7 @@ class rrd
 
    private:
       void create();
+
       bool valid {false};
       std::string rrdpath;
       unsigned step;

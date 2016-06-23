@@ -5,8 +5,6 @@
 #include "aux_log.h"
 #include "lrrd.h"
 
-#include <iostream>
-
 const char * rrd::create_params[] = {
    "rrdcreate",
    "--step",
@@ -91,7 +89,7 @@ void rrd::create()
 void rrd::add_data(double val, double mav)
 {
    static const char *funcname {"rrd::add_data"};
-   if (!valid) return;
+   if (!valid) throw logging::error {funcname, "attempt to add data to uninitialized RRD set."};
 
    buffer datastr;
    datastr.print("N:%f:%f", val, mav);
@@ -107,7 +105,7 @@ void rrd::add_data(double val, double mav)
 void rrd::remove()
 {
    static const char *funcname {"rrd::remove"};
-   if (!valid) return;
+   if (!valid) throw logging::error {funcname, "attempt to remove uninitialized RRD set."};
 
    if (-1 == ::remove(rrdpath.c_str()))
       throw logging::error {funcname, "failed to remove RRD file '%s': %s",
@@ -118,35 +116,53 @@ void rrd::remove()
 void rrd::graph(const char *filename, const char *title, int xsize, int ysize)
 {
    static const char *funcname {"rrd::graph"};
-   buffer end, def1, def2, height, width;
+   if (!valid) throw logging::error {funcname, "attempt to generate graph from uninitialized RRD set."};
+   buffer temp;
 
-   graph_params[1] = filename;
+   // Somehow librrd tends to screw all input parameters. And i can't event understand logic behind it.
+   // So we're making a whole new copy of parameters to pass on to librrd.
+   size_t psize = sizeof(graph_params) / sizeof(char *);
+   const char **params = new const char*[psize]();
 
-   end.print("%lu", time(nullptr) - step);
-   graph_params[3] = end.data();
+   for (unsigned i = 0; i < psize; i++) 
+   {
+      if (nullptr == graph_params[i]) continue;
+      params[i] = new char[strlen(graph_params[i]) + 1]; 
+      strcpy(const_cast<char *>(params[i]), graph_params[i]);
+   }
 
-   height.print("%d", ysize);
-   width.print("%d", xsize);
-   graph_params[5] = height.data();
-   graph_params[7] = width.data();
-   graph_params[9] = title;
+   temp.print(filename);
+   params[1] = temp.clone();
 
-   def1.print("DEF:bc=%s:broadcast:LAST", rrdpath.c_str());
-   def2.print("DEF:mv=%s:maverage:LAST", rrdpath.c_str());
-   graph_params[11] = def1.data();
-   graph_params[12] = def2.data();
+   temp.print("%lu", time(nullptr) + step);
+   params[3] = temp.clone();
+
+   temp.print("%d", ysize);
+   params[5] = temp.clone();
+
+   temp.print("%d", xsize);
+   params[7] = temp.clone();
+
+   temp.print(title);
+   params[9] = temp.clone();
+
+   temp.print("DEF:bc=%s:broadcast:LAST", rrdpath.c_str());
+   params[11] = temp.clone();
+
+   temp.print("DEF:mv=%s:maverage:LAST", rrdpath.c_str());
+   params[12] = temp.clone();
 
    char **calcpr {};
    int result;
    double ymin, ymax;
 
-   for (const char **ptr = graph_params; nullptr != *ptr; ++ptr) std::cerr << *ptr << std::endl;
-   std::cerr << std::endl;
-
    optind = opterr = 0;
-   result = rrd_graph(17, const_cast<char **>(graph_params), &calcpr, &xsize, &ysize, nullptr, &ymin, &ymax);
+   result = rrd_graph(17, const_cast<char **>(params), &calcpr, &xsize, &ysize, nullptr, &ymin, &ymax);
 
    if (calcpr) { for (unsigned int i = 0; (calcpr[i]); i++) free(calcpr[i]); }
+   for (unsigned i = 0; i < psize; i++) delete [] params[i];
+   delete [] params;
+
    if (rrd_test_error() or 0 != result)
       throw logging::error {funcname, "RRD Graph failed: %s", rrd_get_error()};
 }

@@ -1,7 +1,7 @@
 #ifndef LOOPD_DATA_H
 #define LOOPD_DATA_H
 
-#include <unordered_set>
+#include <map>
 
 #include "prog_config.h"
 #include "device.h"
@@ -16,22 +16,16 @@ struct alarm_info
       dev{dev_}, intf{intf_} { }
 };
 
-struct msgdata
-{
-   const conf::string_t &from;
-   const conf::multistring_t &rcpts;
-
-   const device &dev;
-   const int_info &intf;
-   unsigned long bcrate;
-};
-
 using devtasks = std::vector<device *>;
 using inttasks = std::vector<alarm_info>;
 
 extern devsdata devices;
-extern devtasks action_data, action_queue;
+
+// These are accessed with locks (worker.h)
+extern devtasks action_data, action_queue, return_data;
 extern inttasks alarm_data, alarm_queue;
+
+extern std::map<alarmtype, std::string> alarmtype_names;
 
 int callback(int, snmp_session *, int, netsnmp_pdu *, void *, void *);
 void prepare_request(device &);

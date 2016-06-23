@@ -5,6 +5,10 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
+#include <list>
+
+#include "snmp/oids.h"
+
 #include "aux_log.h"
 #include "worker.h"
 #include "data.h"
@@ -12,7 +16,7 @@
 unsigned long check_bc_rate(const device *dev, unsigned intnum)
 {
    static const char *funcname {"check_bc_rate"};
-   static const std::chrono::seconds interval{config["poller"]["recheck_interval"].get<conf::integer_t>()};
+   static const std::chrono::seconds interval {config["poller"]["recheck-interval"].get<conf::integer_t>()};
 
    netsnmp_pdu *req;
    snmp::pdu_handle response;
@@ -22,8 +26,8 @@ unsigned long check_bc_rate(const device *dev, unsigned intnum)
    for (unsigned i = 0; i < 2; i++)
    {
       req = snmp_pdu_create(SNMP_MSG_GET);
-      snmp_add_null_var(req, snmp::oids::if_broadcast, sizeof(snmp::oids::if_broadcast) / sizeof(oid));
-      req->variables->name[(sizeof(snmp::oids::if_broadcast) / sizeof(oid)) - 1] = intnum;
+      snmp_add_null_var(req, snmp::oids::ifbroadcast, snmp::oids::ifbroadcast_size);
+      req->variables->name[snmp::oids::ifbroadcast_size - 1] = intnum;
 
       try { response = snmp::synch_request(sessp, req); }
       catch (snmp::snmprun_error &error)
@@ -43,19 +47,31 @@ unsigned long check_bc_rate(const device *dev, unsigned intnum)
    return (unsigned long) delta;
 }
 
-FILE * generate_message(const char *filename, const msgdata &data)
+FILE * generate_message(alarm_info &data, unsigned long bcrate)
 {
    static const char *funcname {"generate_message"};
+   static const conf::string_t graphfile {config["datadir"].get<conf::string_t>() + "/graph.png"};
 
-   int fd = open(filename, O_RDONLY);
-   if (-1 == fd) throw logging::error {funcname, "Failed top open graph file '%s': %s.",
-      filename, strerror(errno)};
+   static const conf::integer_t xsize {config["notifier"]["image-width"].get<conf::integer_t>()};
+   static const conf::integer_t ysize {config["notifier"]["image-height"].get<conf::integer_t>()};
+   static const conf::string_t &from {config["notifier"]["from"].get<conf::string_t>()};
+   static const conf::multistring_t &rcpts {config["notifier"]["rcpts"].get<conf::multistring_t>()};   
+
+   int_info &intf = *(data.intf);
+   buffer title;
+
+   title.print("%s: %s - %s", data.dev->host.c_str(), intf.name.c_str(), intf.alias.c_str());
+   intf.rrdata.graph(graphfile.c_str(), title.data(), xsize, ysize);
+
+   int fd = open(graphfile.c_str(), O_RDONLY);
+   if (-1 == fd) throw logging::error {funcname, "Failed to open graph file '%s': %s.",
+      graphfile.c_str(), strerror(errno)};
 
    FILE *fp = tmpfile();
    if (nullptr == fp) throw logging::error {funcname, "Failed to create temporary datafile."};
 
-   fprintf(fp, "From: %s\r\n", data.from.c_str());
-   for (const auto &to : data.rcpts) fprintf(fp, "To: %s\r\n", to.c_str());
+   fprintf(fp, "From: %s\r\n", from.c_str());
+   for (const auto &to : rcpts) fprintf(fp, "To: %s\r\n", to.c_str());
 
    fprintf(fp, "Subject: %s: High broadcast pps level - %s\r\n"
                "Mime-Version: 1.0\r\n"
@@ -63,20 +79,24 @@ FILE * generate_message(const char *filename, const msgdata &data)
                "\r\n"
                "--bound\r\n"
                "Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n",
-         data.dev.host.c_str(), data.intf.name.c_str());
+           data.dev->host.c_str(), intf.name.c_str());
 
    fprintf(fp, "High broadcast pps level detected on device: %s - %s<br>\n"
                "Interface: %s - %s<br>\n"
-               "Broadcast pps measured in last 2 seconds: %lu<br><br>\n",
-               data.dev.host.c_str(), data.dev.name.c_str(),
-               data.intf.name.c_str(), data.intf.alias.c_str(), data.bcrate);
+               "Alarm type: <b>%s</b><br>\n",
+           data.dev->host.c_str(), data.dev->name.c_str(), intf.name.c_str(),
+           intf.alias.c_str(), alarmtype_names[intf.data.alarm].c_str());
+
+   if (alarmtype::spike == intf.data.alarm)
+      fprintf(fp, "Broadcast pps measured in last 2 seconds: %lu<br>\n", bcrate);
+   fprintf(fp, "<br>\n");
 
    fprintf(fp, "<IMG SRC=\"cid:graph.png\" ALT=\"Graph\">\r\n"
                "--bound\r\n"
                "Content-Location: CID:somelocation\n"
                "Content-ID: <graph.png>\n"
                "Content-Type: IMAGE/PNG\n"
-               "Content-Transfer-Encoding: BASE64\n\n");
+               "Content-Transfer-Encoding: BASE64\n\n");   
 
    BIO *b64 = BIO_new(BIO_f_base64());
    BIO *bio = BIO_new_fp(fp, BIO_NOCLOSE);
@@ -94,26 +114,12 @@ FILE * generate_message(const char *filename, const msgdata &data)
    return fp;
 }
 
-void send_alarm(const device *dev, int_info *intf, unsigned long bcrate)
+void send_message(FILE *data)
 {
-   static const char *funcname {"send_alarm"};
-   static const conf::string_t &datadir {config["datadir"].get<conf::string_t>()};
-
-   static const conf::integer_t xsize {config["notifier"]["image-width"].get<conf::integer_t>()};
-   static const conf::integer_t ysize {config["notifier"]["image-height"].get<conf::integer_t>()};
-
-   static const conf::string_t &from {config["notifier"]["from"].get<conf::string_t>()};   
+   static const char *funcname {"send_message"};
+   static const conf::string_t &from {config["notifier"]["from"].get<conf::string_t>()};
    static const conf::multistring_t &rcpts {config["notifier"]["rcpts"].get<conf::multistring_t>()};
-   static const conf::string_t smtphost {config["notifier"]["smtphost"].get<conf::string_t>()};
-
-   buffer filename, title;
-   filename.print("%s/graph.png", datadir.c_str());
-   title.print("%s: %s - %s", dev->host.c_str(), intf->name.c_str(), intf->alias.c_str());
-   intf->rrdata.graph(filename.data(), title.data(), xsize, ysize);
-
-   msgdata maildata {from, rcpts, *dev, *intf, bcrate};
-   FILE *data = generate_message(filename.data(), maildata);
-   remove(filename.data());
+   static const conf::string_t &smtphost {config["notifier"]["smtphost"].get<conf::string_t>()};
 
    CURL *curl = curl_easy_init();
    if (nullptr == curl) throw logging::error {funcname, "curl_easy_init failed."};
@@ -134,70 +140,141 @@ void send_alarm(const device *dev, int_info *intf, unsigned long bcrate)
 
    curl_slist_free_all(recipients);
    curl_easy_cleanup(curl);
-   fclose(data);
 }
 
 void process_alarms(std::unique_lock<std::mutex> &datalock)
 {
    static const char *funcname {"process_alarms"};
-
-   alarm_info data;
    unsigned long bcrate {};
 
-   for (;;)
+   for (alarm_info data; !alarm_data.empty();)
    {
-      if (0 == alarm_data.size()) return;
       data = alarm_data.back();
       alarm_data.pop_back();
       datalock.unlock();
 
-      // NOTE: i don't know how i came up with this formula.
-      // If we have a spike rechecking broadcast pps with 2 seconds measure to confirm, that we need to send alert.
-      if (alarmtype::spike == data.intf->data.alarm) bcrate = check_bc_rate(data.dev, data.intf->id);
-      if (0 != bcrate and bcrate < data.intf->data.lastmav * data.intf->data.mav_vals.size() * 0.8)
+      if (alarmtype::spike == data.intf->data.alarm)
       {
-         logger.log_message(LOG_INFO, funcname, "%s: alarm has not been sent. Two second rate: %lu. Calculated: %02.f",
-               data.dev->host.c_str(), bcrate, data.intf->data.lastmav * data.intf->data.mav_vals.size() * 0.8);
+         bcrate = check_bc_rate(data.dev, data.intf->id);
+         double calc = data.intf->data.lastmav * data.intf->data.mav_vals.size() * 0.5;
+
+         if (0 != bcrate and bcrate < calc)
+         {
+            logger.log_message(LOG_INFO, funcname, "%s: alarm has not been sent. Rechecked broadcast rate: %lu. "
+                  "Calculated: %02.f", data.dev->host.c_str(), bcrate, calc);
+            datalock.lock();
+            continue;
+         }
       }
 
-      else send_alarm(data.dev, data.intf, bcrate);
+      FILE *message = generate_message(data, bcrate);
+      send_message(message);
+      fclose(message);
       datalock.lock();
    }
+}
+
+void return_dev(device &dev)
+{
+   std::vector<unsigned> intdel;
+
+   for (auto &it : dev.ints)
+   {
+      if (false == it.second.delmark) continue;
+      it.second.rrdata.remove();
+      intdel.push_back(it.first);
+   }
+
+   for (auto n : intdel) dev.ints.erase(n);
+   dev.reset();
+   
+   prepare_request(dev);
+   return_data.push_back(&dev);
+}
+
+void process_devices(std::unique_lock<std::mutex> &datalock, std::list<device *> &polldevs, thread_sync *syncdata)
+{
+   static const char *funcname {"process_devices"};
+   static const unsigned retry_interval {10};
+   static const unsigned max_backoff {1024};
+
+   if (!action_data.empty())
+   {
+      for (auto &it : action_data)
+      {
+         it->timeticks = 0;
+         polldevs.push_back(it);
+         logger.log_message(LOG_INFO, funcname, "%s: new device task added.", it->host.c_str());
+      }
+
+      action_data.clear();
+   }
+
+   datalock.unlock();
+   time_t rawtime {time(nullptr)};
+
+   for (auto it : polldevs)
+   {
+      device &dev = *it;
+      if (rawtime < dev.timeticks) continue;
+
+      init_device(dev);
+      if (hoststate::enabled == dev.state) update_ints(dev);
+
+      // Checking again in case we failed while interfaces update.
+      if (hoststate::enabled != dev.state)
+      {
+         dev.timeticks = ((0 == dev.timeticks) ? time(nullptr) : dev.timeticks) + retry_interval * dev.wait_backoff;
+         if (dev.wait_backoff < max_backoff) dev.wait_backoff *= 2;
+
+         logger.log_message(LOG_INFO, funcname, "%s: device is still unreachable. Increasing backoff to %u",
+               dev.host.c_str(), dev.wait_backoff);
+         continue;
+      }
+
+      logger.log_message(LOG_INFO, funcname, "%s: device is active. Passing back to the main thread.", dev.host.c_str());
+      syncdata->updatelock.lock();
+
+      return_dev(dev);
+      syncdata->data_updated = true;
+      syncdata->updatelock.unlock();
+   }
+
+   polldevs.remove_if([](device *dev) { return dev->state == hoststate::enabled; });
+   datalock.lock();
 }
 
 void workloop(thread_sync *syncdata)
 {
    static const char *funcname {"workloop"};
+   static const std::chrono::seconds interval {2};
    bool exit {false};
 
-   std::vector<device *> polldevs;
+   std::list<device *> polldevs;
    std::unique_lock<std::mutex> datalock {syncdata->worker_datalock};
 
    for (;;)
    {
-      if (0 == action_data.size() and 0 == alarm_data.size())
+      if (action_data.empty() and alarm_data.empty())
       {
-         if (0 == polldevs.size())
+         datalock.unlock();         
+         if (polldevs.empty())
          {
-            datalock.unlock();
             logger.log_message(LOG_INFO, funcname, "No jobs available - waiting on condition variable.");
-
             std::unique_lock<std::mutex> statelock {syncdata->statelock};
             syncdata->sleeping = true;
 
             while (syncdata->sleeping) syncdata->wake.wait(statelock);
             if (!syncdata->running) exit = true;
-            datalock.lock();            
          }
 
-         // NOTE: else sleep for some time and recheck host timers
+         else std::this_thread::sleep_for(interval);
+         datalock.lock();         
       }
 
-      if (0 != alarm_data.size()) process_alarms(datalock);
+      if (!alarm_data.empty()) process_alarms(datalock);
       if (exit) return;
-
-      // NOTE: we should actually do something.
-      if (0 != action_data.size()) action_data.clear();
+      process_devices(datalock, polldevs, syncdata);
    }   
 }
 
@@ -207,8 +284,8 @@ void worker(thread_sync *syncdata)
 
    try { workloop(syncdata); }
 
-   catch (logging::error &error) {
-      logger.error_exit(funcname, "Exception thrown in worker thread: %s", error.what());
+   catch (std::exception &exc) {
+      logger.error_exit(funcname, "Exception thrown in worker thread: %s", exc.what());
    }
 
    catch (...) {
