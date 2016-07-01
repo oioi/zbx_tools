@@ -116,10 +116,13 @@ void process_intdata(device *dev, netsnmp_variable_list *vars, double timedelta)
    static const char *funcname {"process_intdata"};
    // We're using moving average for an hour period. 
    static const int mavsize {3600 / config["poller"]["poll-interval"].get<conf::integer_t>()};   
+
    static const uint64_t cmax {UINT64_MAX};
+   static const double maxdelta {500000};
 
    intsdata::iterator it;
    uint64_t counter;
+   double delta;
 
    for (unsigned i = 0; nullptr != vars; vars = vars->next_variable, ++i)
    {
@@ -137,9 +140,18 @@ void process_intdata(device *dev, netsnmp_variable_list *vars, double timedelta)
          continue;
       }
 
-      double delta = (counter >= it->second.data.counter) ?
-         (double) (counter - it->second.data.counter) / timedelta :
-         (double) ((cmax - it->second.data.counter) + counter) / timedelta;
+      if (counter < it->second.data.counter)
+      {
+         delta = (double) ((cmax - it->second.data.counter) + counter) / timedelta;
+         if (delta > maxdelta) 
+         {
+            logger.log_message(LOG_INFO, funcname, "%s: %u counter resetted - skipped.",
+               dev->host.c_str(), it->first);
+            continue;
+         }
+      }
+      else delta = (double) (counter - it->second.data.counter) / timedelta;
+
 
       it->second.data.mav_vals.push_front(delta);
       it->second.data.counter = counter;      

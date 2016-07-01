@@ -23,6 +23,13 @@ std::string convertwc(const std::wstring &from)
    return std::string {out.get()};
 }
 
+void escape_string(std::string &source)
+{
+   std::size_t pos = std::string::npos;
+   while (std::string::npos != (pos = source.find('"', (pos == std::string::npos) ? 0 : pos + 2)))
+      source.replace(pos, sizeof(char), "\\\"");
+}
+
 void create_device(devsdata &devices, const std::string &host, const std::string &name, std::string &community)
 {
    static const char *funcname {"create_device"};
@@ -218,7 +225,12 @@ void update_devdata(devsdata *devices)
    const conf::multistring_t &groups = {config["devgroups"].get<conf::multistring_t>()};
    std::vector<unsigned long> groupids;
 
-   for (const auto &group : groups) groupids.push_back(zbx_api::get_groupid_byname(group, zbx_sess));
+   for (const auto &group : groups) 
+   {
+      std::string name {group};
+      escape_string(name);
+      groupids.push_back(zbx_api::get_groupid_byname(name, zbx_sess));
+   }
    for (auto &device : *devices) device.second.delmark = true;
 
    for (const auto &groupid : groupids)
