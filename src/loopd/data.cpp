@@ -143,15 +143,16 @@ void process_intdata(device *dev, netsnmp_variable_list *vars, double timedelta)
       if (counter < it->second.data.counter)
       {
          delta = (double) ((cmax - it->second.data.counter) + counter) / timedelta;
+
          if (delta > maxdelta) 
          {
             logger.log_message(LOG_INFO, funcname, "%s: %u counter resetted - skipped.",
                dev->host.c_str(), it->first);
+            it->second.data.counter = counter;
             continue;
          }
       }
       else delta = (double) (counter - it->second.data.counter) / timedelta;
-
 
       it->second.data.mav_vals.push_front(delta);
       it->second.data.counter = counter;      

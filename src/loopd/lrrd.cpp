@@ -134,7 +134,7 @@ void rrd::graph(const char *filename, const char *title, int xsize, int ysize)
    temp.print(filename);
    params[1] = temp.clone();
 
-   temp.print("%lu", time(nullptr) + step);
+   temp.print("%lu", time(nullptr) + step * 2);
    params[3] = temp.clone();
 
    temp.print("%d", ysize);

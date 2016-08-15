@@ -248,34 +248,39 @@ void workloop(thread_sync *syncdata)
 {
    static const char *funcname {"workloop"};
    static const std::chrono::seconds interval {2};
-   bool exit {false};
 
    std::list<device *> polldevs;
    std::unique_lock<std::mutex> datalock {syncdata->worker_datalock};
+   std::unique_lock<std::mutex> statelock {syncdata->statelock, std::defer_lock};
 
    for (;;)
    {
       if (action_data.empty() and alarm_data.empty())
       {
-         datalock.unlock();         
+         datalock.unlock();
+
          if (polldevs.empty())
          {
+            statelock.lock();
             logger.log_message(LOG_INFO, funcname, "No jobs available - waiting on condition variable.");
-            std::unique_lock<std::mutex> statelock {syncdata->statelock};
-            syncdata->sleeping = true;
 
+            syncdata->sleeping = true;
             while (syncdata->sleeping) syncdata->wake.wait(statelock);
-            if (!syncdata->running) exit = true;
+            statelock.unlock();
          }
 
          else std::this_thread::sleep_for(interval);
-         datalock.lock();         
+         datalock.lock();
       }
 
       if (!alarm_data.empty()) process_alarms(datalock);
-      if (exit) return;
+
+      statelock.lock();
+      if (!syncdata->running) return;
+      statelock.unlock();
+
       process_devices(datalock, polldevs, syncdata);
-   }   
+   }
 }
 
 void worker(thread_sync *syncdata)
