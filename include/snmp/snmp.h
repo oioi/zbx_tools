@@ -88,10 +88,10 @@ struct pdu_handle
    void free() { if (nullptr != pdu) { snmp_free_pdu(pdu); pdu = nullptr; } }
    ~pdu_handle() { free(); }
 
-   pdu_handle(const pdu_handle &other) { pdu = snmp_clone_pdu(other.pdu); }
+   pdu_handle(const pdu_handle &other) { pdu = (nullptr == other.pdu) ? nullptr : snmp_clone_pdu(other.pdu); }
    pdu_handle(pdu_handle &&other) : pdu{other.pdu} { other.pdu = nullptr; }
 
-   pdu_handle & operator =(const pdu_handle &other) { pdu = snmp_clone_pdu(other.pdu); return *this; }
+   pdu_handle & operator =(const pdu_handle &other) { pdu = (nullptr == other.pdu) ? nullptr : snmp_clone_pdu(other.pdu); return *this; }
    pdu_handle & operator =(pdu_handle &&other) { pdu = other.pdu; other.pdu = nullptr; return *this; }
 
    operator netsnmp_pdu *() { return pdu; }
