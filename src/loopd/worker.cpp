@@ -145,7 +145,11 @@ void send_message(FILE *data)
 void process_alarms(std::unique_lock<std::mutex> &datalock)
 {
    static const char *funcname {"process_alarms"};
+   static const double bcmax_c  {config["poller"]["bcmax"].get<conf::integer_t>() * 0.8};
+   static const double mavmax_c {config["poller"]["mavmax"].get<conf::integer_t>() * 0.8};
+
    unsigned long bcrate {};
+   double calc {};
 
    for (alarm_info data; !alarm_data.empty();)
    {
@@ -153,18 +157,21 @@ void process_alarms(std::unique_lock<std::mutex> &datalock)
       alarm_data.pop_back();
       datalock.unlock();
 
-      if (alarmtype::spike == data.intf->data.alarm)
+      bcrate = check_bc_rate(data.dev, data.intf->id);
+      switch (data.intf->data.alarm)
       {
-         bcrate = check_bc_rate(data.dev, data.intf->id);
-         double calc = data.intf->data.lastmav * data.intf->data.mav_vals.size() * 0.5;
+         case alarmtype::spike:  calc = data.intf->data.lastmav * data.intf->data.mav_vals.size() * 0.5; break;
+         case alarmtype::bcmax:  calc = bcmax_c; break;
+         case alarmtype::mavmax: calc = mavmax_c; break;
+         default: throw logging::error {funcname, "%s: unexpected alarm type", data.dev->host.c_str()};
+      }
 
-         if (0 != bcrate and bcrate < calc)
-         {
+      if (0 != bcrate and bcrate < calc)
+      {
             logger.log_message(LOG_INFO, funcname, "%s: alarm has not been sent. Rechecked broadcast rate: %lu. "
                   "Calculated: %02.f", data.dev->host.c_str(), bcrate, calc);
             datalock.lock();
             continue;
-         }
       }
 
       FILE *message = generate_message(data, bcrate);
